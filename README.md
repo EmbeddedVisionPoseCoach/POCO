@@ -59,7 +59,7 @@
 ## 5.2 Tools
 |  |  |  |
 |-----------------|-----------------|-----------------|
-| PyQt    |  <img width="316" height="181" alt="Image" src="https://github.com/user-attachments/assets/9c7849e8-34a0-4a16-a9a5-a47b76e2920b" /> |  |
+| PyQt    |  <img width="100" height="100" alt="Image" src="https://github.com/user-attachments/assets/9c7849e8-34a0-4a16-a9a5-a47b76e2920b" /> |  |
 | Git    |  <img src="https://github.com/user-attachments/assets/483abc38-ed4d-487c-b43a-3963b33430e6" alt="git" width="100">    |
 
 <br/>
@@ -68,7 +68,7 @@
 |  |  |
 |-----------------|-----------------|
 | Notion    |  <img src="https://github.com/user-attachments/assets/34141eb9-deca-416a-a83f-ff9543cc2f9a" alt="Notion" width="100">    |
-| Discord    |  <img src="https://github.com/user-attachments/assets/34141eb9-deca-416a-a83f-ff9543cc2f9a" alt="Discord" width="100">    |
+| Discord    |  <img width="100" height="100" alt="Discord" src="https://github.com/user-attachments/assets/6a04f201-3a86-48d1-8c61-e80e19908dad" />   |
 
 <br/>
 
