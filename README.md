@@ -1,15 +1,17 @@
-- 
 <p align="center">
 <img src="https://github.com/user-attachments/assets/70835863-99d3-49f9-8c00-1537c45be83e" alt="배너" width="100%"/>
 </a>
 
 <br/>
 <br/>
+<br/>
+
 
 # 1. Project Overview (프로젝트 개요)
 - 프로젝트 이름: 비전 응용 자세코칭
 - 프로젝트 설명: 자세 분석 기능, 자세 실시간 피드백 기능, 알림 기능, 휴식 가이드, 사용자 맞춤 서비스
 
+<br/>
 <br/>
 <br/>
 
@@ -18,6 +20,7 @@
 |:------:|:------:|:------:|:------:|
 | <img src="https://github.com/user-attachments/assets/89f05e5a-b0ce-45b3-8a48-5174570ca30c" alt="조병현" width="180"> | <img src="https://github.com/user-attachments/assets/89f05e5a-b0ce-45b3-8a48-5174570ca30c" alt="신동민" width="180"> | <img src="https://github.com/user-attachments/assets/89f05e5a-b0ce-45b3-8a48-5174570ca30c" alt="이종현" width="180"> | <img src="https://github.com/user-attachments/assets/89f05e5a-b0ce-45b3-8a48-5174570ca30c" alt="최은비" width="180"> |
 
+<br/>
 <br/>
 <br/>
 
@@ -32,9 +35,10 @@
   - 알림
   - 방석 진동
 
-- **자세 분석한 데이터를 활용한 UI제공 **:
+- **자세 분석한 데이터를 활용한 UI제공**:
   - 시간 단위 OR 하루 단위로 데이터 측정 후 휴식 가이드 및 피드백제공
 
+<br/>
 <br/>
 <br/>
 
@@ -46,6 +50,7 @@
 | 이종현   |  <img src="https://github.com/user-attachments/assets/89f05e5a-b0ce-45b3-8a48-5174570ca30c" alt="이종현" width="100">    |<ul><li>추가 예정</li><li>추가 예정</li><li>자세판단 모델 구현(Face)</li></ul>  |
 | 최은비    |  <img src="https://github.com/user-attachments/assets/89f05e5a-b0ce-45b3-8a48-5174570ca30c" alt="최은비" width="100">    | <ul><li>추가 예정</li><li>추가 예정</li><li>자세판단 모델 구현(Pose)</li></ul>    |
 
+<br/>
 <br/>
 <br/>
 
