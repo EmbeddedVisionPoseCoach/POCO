@@ -58,7 +58,9 @@
 ## 5.1 Stacks
 |  |  |
 |-----------------|-----------------|
-| Python    |<img src="https://github.com/user-attachments/assets/a53ff60f-ac59-4356-9108-a9ac4691bb36" alt="Python" width="100">| 
+| Python    |<img src="https://github.com/user-attachments/assets/a53ff60f-ac59-4356-9108-a9ac4691bb36" alt="Python" width="100">|
+| RasPI5    |<img src="https://github.com/user-attachments/assets/089ebc7d-fe18-4f39-83d8-11867e175eb9" alt="Raspi5" width="100">|
+| TensorFlow    |<img src="https://github.com/user-attachments/assets/4d2beb7c-dc19-470c-8387-c72ea8d9174d" alt="TensorFlow" width="100">|
 <br/>
 
 ## 5.2 Tools
