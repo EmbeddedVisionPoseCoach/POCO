@@ -16,7 +16,7 @@
 # 2. Team Members (팀원 및 팀 소개)
 | 조병현 | 신동민 | 이종현 | 최은비 |
 |:------:|:------:|:------:|:------:|
-| <img src="https://github.com/user-attachments/assets/c1c2b1e3-656d-4712-98ab-a15e91efa2da" alt="조병현" width="150"> | <img src="https://github.com/user-attachments/assets/78ec4937-81bb-4637-975d-631eb3c4601e" alt="신동민" width="150"> | <img src="https://github.com/user-attachments/assets/78ce1062-80a0-4edb-bf6b-5efac9dd992e" alt="이종현" width="150"> | <img src="https://github.com/user-attachments/assets/beea8c64-19de-4d91-955f-ed24b813a638" alt="최은비" width="150"> |
+| <img src="https://github.com/user-attachments/assets/89f05e5a-b0ce-45b3-8a48-5174570ca30c" alt="조병현" width="150"> | <img src="https://github.com/user-attachments/assets/89f05e5a-b0ce-45b3-8a48-5174570ca30c" alt="신동민" width="150"> | <img src="https://github.com/user-attachments/assets/89f05e5a-b0ce-45b3-8a48-5174570ca30c" alt="이종현" width="150"> | <img src="https://github.com/user-attachments/assets/89f05e5a-b0ce-45b3-8a48-5174570ca30c" alt="최은비" width="150"> |
 
 <br/>
 <br/>
@@ -41,10 +41,10 @@
 # 4. Tasks & Responsibilities (작업 및 역할 분담)
 |  |  |  |
 |-----------------|-----------------|-----------------|
-| 조병현    |  <img src="https://github.com/user-attachments/assets/c1c2b1e3-656d-4712-98ab-a15e91efa2da" alt="이동규" width="100"> | <ul><li>추가 예정</li><li>추가 예정</li><li>모델 파인튜닝</li></ul>     |
-| 신동민   |  <img src="https://github.com/user-attachments/assets/78ec4937-81bb-4637-975d-631eb3c4601e" alt="신유승" width="100">| <ul><li>추가 예정</li><li>추가 예정</li><li>UI 구현</li></ul> |
-| 이종현   |  <img src="https://github.com/user-attachments/assets/78ce1062-80a0-4edb-bf6b-5efac9dd992e" alt="김나연" width="100">    |<ul><li>추가 예정</li><li>추가 예정</li><li>자세판단 모델 구현(Face)</li></ul>  |
-| 최은비    |  <img src="https://github.com/user-attachments/assets/beea8c64-19de-4d91-955f-ed24b813a638" alt="이승준" width="100">    | <ul><li>추가 예정</li><li>추가 예정</li><li>자세판단 모델 구현(Pose)</li></ul>    |
+| 조병현    |  <img src="https://github.com/user-attachments/assets/89f05e5a-b0ce-45b3-8a48-5174570ca30c" alt="조병현" width="100"> | <ul><li>추가 예정</li><li>추가 예정</li><li>모델 파인튜닝</li></ul>     |
+| 신동민   |  <img src="https://github.com/user-attachments/assets/89f05e5a-b0ce-45b3-8a48-5174570ca30c" alt="신동민" width="100">| <ul><li>추가 예정</li><li>추가 예정</li><li>UI 구현</li></ul> |
+| 이종현   |  <img src="https://github.com/user-attachments/assets/89f05e5a-b0ce-45b3-8a48-5174570ca30c" alt="이종현" width="100">    |<ul><li>추가 예정</li><li>추가 예정</li><li>자세판단 모델 구현(Face)</li></ul>  |
+| 최은비    |  <img src="https://github.com/user-attachments/assets/89f05e5a-b0ce-45b3-8a48-5174570ca30c" alt="최은비" width="100">    | <ul><li>추가 예정</li><li>추가 예정</li><li>자세판단 모델 구현(Pose)</li></ul>    |
 
 <br/>
 <br/>
