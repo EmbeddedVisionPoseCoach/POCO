@@ -1,1 +1,1 @@
-122
+print("Hello World)
