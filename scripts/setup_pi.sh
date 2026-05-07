@@ -4,7 +4,7 @@ echo "=========================================="
 echo "      라즈베리 파이 AI 및 GUI 환경 통합 구축"
 echo "=========================================="
 
-# [중요] 스크립트 위치와 상관없이 프로젝트 루트로 이동
+# [중요] 프로젝트 루트로 이동
 cd "$(dirname "$0")/.."
 echo "현재 작업 디렉토리: $(pwd)"
 
@@ -13,6 +13,12 @@ if [ ! -d ".venv" ]; then
     echo "[1/8] 가상환경(.venv) 생성 중..."
     python3 -m venv .venv
 fi
+
+# 가상환경이 시스템 패키지(PyQt5 등)를 인식하도록 설정 변경
+echo "가상환경 설정을 시스템 패키지 허용으로 변경..."
+sed -i 's/include-system-site-packages = false/include-system-site-packages = true/' .venv/pyvenv.cfg
+
+# 가상환경 활성화
 source .venv/bin/activate
 
 # [2/8] 필수 도구 업데이트
@@ -46,27 +52,25 @@ if [ -f "install/$TFLITE_SH" ]; then
     cd ..
 fi
 
-# [5/8] OpenCV 및 AI 라이브러리 설치 (버전 동기화)
-echo "[5/8] OpenCV 및 기타 라이브러리 설치 (4.10.0.84)..."
+# [5/8] OpenCV 및 AI 라이브러리 설치 (4.10.0.84 동기화)
+echo "[5/8] OpenCV 및 기타 라이브러리 설치..."
 pip uninstall -y opencv-python opencv-contrib-python opencv-python-headless
 pip install "opencv-python==4.10.0.84" "opencv-contrib-python==4.10.0.84"
 pip install "mediapipe==0.10.14" "jax<0.4.20" "jaxlib<0.4.20" "ml-dtypes~=0.2.0" "pandas==2.1.4" cvzone h5py ai-edge-litert
 
-# [6/8] NumPy 버전 고정 (안정성 확보)
+# [6/8] NumPy 버전 고정
 echo "[6/8] NumPy 버전 최적화 (1.x 고정)..."
 pip install "numpy<2.0.0"
 
-# [7/8] QT5 및 PyQt5 시스템 의존성 설치 (추가됨)
-echo "[7/8] QT5 시스템 패키지 및 PyQt5 설치..."
-# 시스템 라이브러리 설치 (비밀번호를 물어볼 수 있습니다)
+# [7/8] QT5 시스템 패키지 및 PyQt5 설치 (사용자 목록 반영)
+echo "[7/8] QT5 및 파이썬 PyQt5 시스템 패키지 설치..."
 sudo apt update
-sudo apt install -y build-essential perl python-is-python3 git \
+# 사용자님이 주신 목록 + 파이썬 연결용 python3-pyqt5 추가
+sudo apt install -y python3-pyqt5 \
+    build-essential perl python-is-python3 2to3 git \
     qtbase5-dev qtchooser qt5-qmake qtbase5-dev-tools \
     qtdeclarative5-dev cmake qtbase5-examples qt5-doc qt5-doc-html \
     qtmultimedia5-dev libqt5multimedia5-plugins
-
-# 가상환경 내 PyQt5 설치
-pip install "PyQt5==5.15.10" "PyQt5-Qt5==5.15.2" "PyQt5-sip"
 
 # [8/8] 최종 결과 확인
 echo "=========================================="
