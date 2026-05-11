@@ -197,7 +197,7 @@ VisionPoseCoach는 사용자의 앉은 자세를 실시간으로 분석하고, �
 
 ## 시스템 구성
 
-<img width="100" height="100" alt="Discord" src="https://github.com/VisionAITeamProject/ImageUploadRepo/blob/d4650cb4331b4374bdef94e2184f104f6e10ee05/ProjectSequenceImage.png" />
+<img width="300" height="300" alt="Discord" src="https://github.com/VisionAITeamProject/ImageUploadRepo/blob/d4650cb4331b4374bdef94e2184f104f6e10ee05/ProjectSequenceImage.png" />
 
 <br/>
 <br/>
