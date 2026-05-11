@@ -40,7 +40,7 @@ VisionPoseCoach는 사용자의 앉은 자세를 실시간으로 분석하고, �
 # 2. Team Members (팀원 및 팀 소개)
 | 조병현 | 신동민 | 이종현 | 최은비 |
 |:------:|:------:|:------:|:------:|
-| <img src="https://github.com/VisionAITeamProject/ImageUploadRepo/blob/4786246569c1237d3ee9a73786d18f3fbdaa8efe/byunghyun.png" alt="조병현" width="150" height="150" > | <img src="https://github.com/user-attachments/assets/89f05e5a-b0ce-45b3-8a48-5174570ca30c" alt="신동민" width="150" height="150"> | <img src="https://github.com/user-attachments/assets/89f05e5a-b0ce-45b3-8a48-5174570ca30c" alt="이종현" width="150" height="150"> | <img src="https://github.com/user-attachments/assets/89f05e5a-b0ce-45b3-8a48-5174570ca30c" alt="최은비" width="150" height="150"> |
+| <img src="https://github.com/VisionAITeamProject/ImageUploadRepo/blob/4786246569c1237d3ee9a73786d18f3fbdaa8efe/byunghyun.png" alt="조병현" width="150" height="150" > | <img src="https://github.com/VisionAITeamProject/ImageUploadRepo/blob/525a65bd8bcf20387ab53856dfa0d6694551d765/YouYou.jpg" alt="신동민" width="150" height="150"> | <img src="https://github.com/user-attachments/assets/89f05e5a-b0ce-45b3-8a48-5174570ca30c" alt="이종현" width="150" height="150"> | <img src="https://github.com/user-attachments/assets/89f05e5a-b0ce-45b3-8a48-5174570ca30c" alt="최은비" width="150" height="150"> |
 
 <br/>
 <br/>
@@ -109,8 +109,8 @@ VisionPoseCoach는 사용자의 앉은 자세를 실시간으로 분석하고, �
 # 4. Tasks & Responsibilities (작업 및 역할 분담)
 |  |  |  |
 |-----------------|-----------------|-----------------|
-| 조병현    |  <img src="https://github.com/user-attachments/assets/89f05e5a-b0ce-45b3-8a48-5174570ca30c" alt="조병현" width="100"> | <ul><li>Pose 모델 구현 및 튜닝</li><li>자세 데이터 수집</li></ul>     |
-| 신동민   |  <img src="https://github.com/user-attachments/assets/89f05e5a-b0ce-45b3-8a48-5174570ca30c" alt="신동민" width="100">| <ul><li>리포트 웹 개발</li><li>데이터 수집</li></ul> |
+| 조병현    |  <img src="https://github.com/VisionAITeamProject/ImageUploadRepo/blob/4786246569c1237d3ee9a73786d18f3fbdaa8efe/byunghyun.png" alt="조병현" width="100"> | <ul><li>Pose 모델 구현 및 튜닝</li><li>자세 데이터 수집</li></ul>     |
+| 신동민   |  <img src="https://github.com/VisionAITeamProject/ImageUploadRepo/blob/525a65bd8bcf20387ab53856dfa0d6694551d765/YouYou.jpg" alt="신동민" width="100">| <ul><li>리포트 웹 개발</li><li>데이터 수집</li></ul> |
 | 이종현   |  <img src="https://github.com/user-attachments/assets/89f05e5a-b0ce-45b3-8a48-5174570ca30c" alt="이종현" width="100">    |<ul><li>Face 모델 구현 및 튜닝</li><li>피로도 데이터 수집</li></ul>  |
 | 최은비    |  <img src="https://github.com/user-attachments/assets/89f05e5a-b0ce-45b3-8a48-5174570ca30c" alt="최은비" width="100">    | <ul><li>하드웨어 부저 및 진동 알림 기능</li><li>데이터 수집</li></ul>    |
 
@@ -170,10 +170,9 @@ VisionPoseCoach는 사용자의 앉은 자세를 실시간으로 분석하고, �
 ## 5.2 Tools
 |  |  |  |
 |-----------------|-----------------|-----------------|
-| PyQt    |  <img width="100" height="100" alt="Image" src="https://github.com/user-attachments/assets/9c7849e8-34a0-4a16-a9a5-a47b76e2920b" /> |  |
+| PyQt    |  <img width="100" height="100" alt="Image" src="https://github.com/VisionAITeamProject/ImageUploadRepo/blob/3856e4dc4cf324b7b757dc39256c0d044d13651b/Qt%20Framework.png" /> |  |
 | Git    |  <img src="https://github.com/user-attachments/assets/483abc38-ed4d-487c-b43a-3963b33430e6" alt="git" width="100">    |
 | Streamlit    |<img src="https://github.com/VisionAITeamProject/ImageUploadRepo/blob/6fb8c9841f37247689fd3032bf65cb00c0d38769/Streamlit.png" alt="Streamlit" width="100">|
-| Arduino IDE    |<img src="https://github.com/user-attachments/assets/4d2beb7c-dc19-470c-8387-c72ea8d9174d" alt="ArduinoIDE" width="100">|
 
 <br/>
 
