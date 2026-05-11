@@ -104,20 +104,22 @@ VisionPoseCoach는 사용자의 앉은 자세를 실시간으로 분석하고, �
 <br/>
 <br/>
 <br/>
-
+---
+<br/>
 # 4. Tasks & Responsibilities (작업 및 역할 분담)
 |  |  |  |
 |-----------------|-----------------|-----------------|
-| 조병현    |  <img src="https://github.com/user-attachments/assets/89f05e5a-b0ce-45b3-8a48-5174570ca30c" alt="조병현" width="100"> | <ul><li>Pose 모델 구현 및 튜닝</li><li>모델 튜닝</li><li>자세 데이터 수집</li></ul>     |
+| 조병현    |  <img src="https://github.com/user-attachments/assets/89f05e5a-b0ce-45b3-8a48-5174570ca30c" alt="조병현" width="100"> | <ul><li>Pose 모델 구현 및 튜닝</li><li>자세 데이터 수집</li></ul>     |
 | 신동민   |  <img src="https://github.com/user-attachments/assets/89f05e5a-b0ce-45b3-8a48-5174570ca30c" alt="신동민" width="100">| <ul><li>리포트 웹 개발</li><li>데이터 수집</li></ul> |
-| 이종현   |  <img src="https://github.com/user-attachments/assets/89f05e5a-b0ce-45b3-8a48-5174570ca30c" alt="이종현" width="100">    |<ul><li>Face 모델 구현 및 튜닝</li><li>모델 튜닝</li><li>피로도 데이터 수집</li></ul>  |
+| 이종현   |  <img src="https://github.com/user-attachments/assets/89f05e5a-b0ce-45b3-8a48-5174570ca30c" alt="이종현" width="100">    |<ul><li>Face 모델 구현 및 튜닝</li><li>피로도 데이터 수집</li></ul>  |
 | 최은비    |  <img src="https://github.com/user-attachments/assets/89f05e5a-b0ce-45b3-8a48-5174570ca30c" alt="최은비" width="100">    | <ul><li>하드웨어 부저 및 진동 알림 기능</li><li>데이터 수집</li></ul>    |
 
 
 <br/>
 <br/>
 <br/>
-
+---
+<br/>
 ## 담당 기능 상세
 
 ### 모델 파트
