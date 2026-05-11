@@ -48,7 +48,7 @@ VisionPoseCoach는 사용자의 앉은 자세를 실시간으로 분석하고, �
 
 # 3. 주요 기능
 
-### 1. 자세 판단 기능
+### 3.1 자세 판단 기능
 
 - **사용자의 신체 랜드마크 데이터를 기반으로 자세 상태를 분석합니다.**
  
@@ -59,7 +59,7 @@ VisionPoseCoach는 사용자의 앉은 자세를 실시간으로 분석하고, �
 - 사용자별 기준 자세 설정
 <br/>
 
-### 2. 피로도 분석 기능
+### 3.2 피로도 분석 기능
 
 - **Face Mesh 기반 데이터를 활용하여 사용자의 피로 상태를 보조적으로 분석합니다.**:
   
@@ -69,7 +69,7 @@ VisionPoseCoach는 사용자의 앉은 자세를 실시간으로 분석하고, �
 - 자세 데이터와 함께 종합적인 상태 분석
 <br/>
 
-### 3. 실시간 알림 기능
+### 3.3 실시간 알림 기능
 
 - **비정상적인 자세가 일정 시간 이상 지속될 경우 사용자에게 즉각적인 알림을 제공합니다.**
   
@@ -79,7 +79,7 @@ VisionPoseCoach는 사용자의 앉은 자세를 실시간으로 분석하고, �
 - 하드웨어 기반 피드백 제공
 <br/>
 
-### 4. 일일 리포트 웹 기능
+### 3.4 일일 리포트 웹 기능
 
 - **측정된 자세 데이터를 기반으로 하루 단위 리포트를 제공합니다.**
   
@@ -92,7 +92,7 @@ VisionPoseCoach는 사용자의 앉은 자세를 실시간으로 분석하고, �
 <br/>
 
 
-### 5. 웹캠 수평 보정 기능
+### 3.5 웹캠 수평 보정 기능
 
 - **정확한 자세 판단을 위해 카메라의 기울어짐을 보정하는 기능을 제공합니다.**
 
@@ -156,8 +156,8 @@ VisionPoseCoach는 사용자의 앉은 자세를 실시간으로 분석하고, �
 <br/>
 
 
-# 6. Technology Stack (기술 스택)
-## 6.1 Stacks
+# 5. Technology Stack (기술 스택)
+## 5.1 Stacks
 |  |  |
 |-----------------|-----------------|
 | Python    |<img src="https://github.com/user-attachments/assets/a53ff60f-ac59-4356-9108-a9ac4691bb36" alt="Python" width="100">|
@@ -166,7 +166,7 @@ VisionPoseCoach는 사용자의 앉은 자세를 실시간으로 분석하고, �
 | Arduino    |<img src="https://github.com/user-attachments/assets/4d2beb7c-dc19-470c-8387-c72ea8d9174d" alt="Arduino" width="100">|
 <br/>
 
-## 6.2 Tools
+## 5.2 Tools
 |  |  |  |
 |-----------------|-----------------|-----------------|
 | PyQt    |  <img width="100" height="100" alt="Image" src="https://github.com/user-attachments/assets/9c7849e8-34a0-4a16-a9a5-a47b76e2920b" /> |  |
@@ -176,7 +176,7 @@ VisionPoseCoach는 사용자의 앉은 자세를 실시간으로 분석하고, �
 
 <br/>
 
-## 6.3 Collaboration
+## 5.3 Collaboration
 |  |  |
 |-----------------|-----------------|
 | Notion    |  <img src="https://github.com/user-attachments/assets/34141eb9-deca-416a-a83f-ff9543cc2f9a" alt="Notion" width="100">    |
