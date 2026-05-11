@@ -1,5 +1,5 @@
 <p align="center">
-<img src="https://github.com/VisionAITeamProject/ImageUploadRepo/blob/4786246569c1237d3ee9a73786d18f3fbdaa8efe/visionFile.png" alt="배너" width="100%"/>
+<img src="https://github.com/VisionAITeamProject/ImageUploadRepo/blob/e77c6f5d0e1ae55fe3329129abc43a7e8f1f03b3/%EC%9E%90%EC%84%B8%EC%BD%94%EC%B9%AD.png" alt="배너" width="100%"/>
 </a>
 
 <br/>
@@ -7,7 +7,7 @@
 <br/>
 
 
-# 팀명 : 포코 (POCO)
+# ✨팀명 : 포코 (POCO)
 > 비전 AI 기반 자세 교정 및 일일 리포트 시스템
 <br/>
 
