@@ -189,15 +189,16 @@ VisionPoseCoach는 사용자의 앉은 자세를 실시간으로 분석하고, �
 <br/>
 
 # 6. Project Structure (프로젝트 구조)
-```plaintext
-추가예정
-```
 
+<img alt="SystemArchitecture" src="https://github.com/VisionAITeamProject/ImageUploadRepo/blob/23bfbe56e9d03909a961b0f9dd12a269cd160e61/ProjectArchitecture.png"/>
 
+<br/>
+<br/>
+<br/>
 
 ## 시스템 구성
 
-<img width="300" height="300" alt="Discord" src="https://github.com/VisionAITeamProject/ImageUploadRepo/blob/d4650cb4331b4374bdef94e2184f104f6e10ee05/ProjectSequenceImage.png" />
+<img width="400" height="500" alt="System" src="https://github.com/VisionAITeamProject/ImageUploadRepo/blob/d4650cb4331b4374bdef94e2184f104f6e10ee05/ProjectSequenceImage.png" />
 
 <br/>
 <br/>
