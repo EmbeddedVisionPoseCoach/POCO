@@ -1,5 +1,5 @@
 <p align="center">
-<img src="https://github.com/user-attachments/assets/70835863-99d3-49f9-8c00-1537c45be83e" alt="배너" width="100%"/>
+<img src="https://github.com/VisionAITeamProject/ImageUploadRepo/blob/4786246569c1237d3ee9a73786d18f3fbdaa8efe/visionFile.png" alt="배너" width="100%"/>
 </a>
 
 <br/>
@@ -40,7 +40,7 @@ VisionPoseCoach는 사용자의 앉은 자세를 실시간으로 분석하고, �
 # 2. Team Members (팀원 및 팀 소개)
 | 조병현 | 신동민 | 이종현 | 최은비 |
 |:------:|:------:|:------:|:------:|
-| <img src="https://github.com/user-attachments/assets/89f05e5a-b0ce-45b3-8a48-5174570ca30c" alt="조병현" width="150" height="150" > | <img src="https://github.com/user-attachments/assets/89f05e5a-b0ce-45b3-8a48-5174570ca30c" alt="신동민" width="150" height="150"> | <img src="https://github.com/user-attachments/assets/89f05e5a-b0ce-45b3-8a48-5174570ca30c" alt="이종현" width="150" height="150"> | <img src="https://github.com/user-attachments/assets/89f05e5a-b0ce-45b3-8a48-5174570ca30c" alt="최은비" width="150" height="150"> |
+| <img src="https://github.com/VisionAITeamProject/ImageUploadRepo/blob/4786246569c1237d3ee9a73786d18f3fbdaa8efe/byunghyun.png" alt="조병현" width="150" height="150" > | <img src="https://github.com/user-attachments/assets/89f05e5a-b0ce-45b3-8a48-5174570ca30c" alt="신동민" width="150" height="150"> | <img src="https://github.com/user-attachments/assets/89f05e5a-b0ce-45b3-8a48-5174570ca30c" alt="이종현" width="150" height="150"> | <img src="https://github.com/user-attachments/assets/89f05e5a-b0ce-45b3-8a48-5174570ca30c" alt="최은비" width="150" height="150"> |
 
 <br/>
 <br/>
@@ -161,10 +161,10 @@ VisionPoseCoach는 사용자의 앉은 자세를 실시간으로 분석하고, �
 ## 5.1 Stacks
 |  |  |
 |-----------------|-----------------|
-| Python    |<img src="https://github.com/user-attachments/assets/a53ff60f-ac59-4356-9108-a9ac4691bb36" alt="Python" width="100">|
-| RasPI5    |<img src="https://github.com/user-attachments/assets/089ebc7d-fe18-4f39-83d8-11867e175eb9" alt="Raspi5" width="100">|
-| TensorFlow    |<img src="https://github.com/user-attachments/assets/4d2beb7c-dc19-470c-8387-c72ea8d9174d" alt="TensorFlow" width="100">|
-| Arduino    |<img src="https://github.com/user-attachments/assets/4d2beb7c-dc19-470c-8387-c72ea8d9174d" alt="Arduino" width="100">|
+| Python    |<img src="https://github.com/VisionAITeamProject/ImageUploadRepo/blob/4786246569c1237d3ee9a73786d18f3fbdaa8efe/Python.png" alt="Python" width="100">|
+| RasPI5    |<img src="https://github.com/VisionAITeamProject/ImageUploadRepo/blob/4786246569c1237d3ee9a73786d18f3fbdaa8efe/Raspberry%20Pi%20(1).png" alt="Raspi5" width="100">|
+| TensorFlow    |<img src="https://github.com/VisionAITeamProject/ImageUploadRepo/blob/4786246569c1237d3ee9a73786d18f3fbdaa8efe/TensorFlow.png" alt="TensorFlow" width="100">|
+| Arduino    |<img src="https://github.com/VisionAITeamProject/ImageUploadRepo/blob/b384f1fd15d78fb33fb819dfae5760fef20a0fd3/Arduino.png" alt="Arduino" width="100">|
 <br/>
 
 ## 5.2 Tools
@@ -172,7 +172,7 @@ VisionPoseCoach는 사용자의 앉은 자세를 실시간으로 분석하고, �
 |-----------------|-----------------|-----------------|
 | PyQt    |  <img width="100" height="100" alt="Image" src="https://github.com/user-attachments/assets/9c7849e8-34a0-4a16-a9a5-a47b76e2920b" /> |  |
 | Git    |  <img src="https://github.com/user-attachments/assets/483abc38-ed4d-487c-b43a-3963b33430e6" alt="git" width="100">    |
-| Streamlit    |<img src="https://github.com/user-attachments/assets/4d2beb7c-dc19-470c-8387-c72ea8d9174d" alt="Streamlit" width="100">|
+| Streamlit    |<img src="https://github.com/VisionAITeamProject/ImageUploadRepo/blob/6fb8c9841f37247689fd3032bf65cb00c0d38769/Streamlit.png" alt="Streamlit" width="100">|
 | Arduino IDE    |<img src="https://github.com/user-attachments/assets/4d2beb7c-dc19-470c-8387-c72ea8d9174d" alt="ArduinoIDE" width="100">|
 
 <br/>
@@ -181,7 +181,7 @@ VisionPoseCoach는 사용자의 앉은 자세를 실시간으로 분석하고, �
 |  |  |
 |-----------------|-----------------|
 | Notion    |  <img src="https://github.com/user-attachments/assets/34141eb9-deca-416a-a83f-ff9543cc2f9a" alt="Notion" width="100">    |
-| Discord    |  <img width="100" height="100" alt="Discord" src="https://github.com/user-attachments/assets/6a04f201-3a86-48d1-8c61-e80e19908dad" />   |
+| Discord    |  <img width="100" height="100" alt="Discord" src="https://github.com/VisionAITeamProject/ImageUploadRepo/blob/6fb8c9841f37247689fd3032bf65cb00c0d38769/discord.png" />   |
 
 <br/>
 
