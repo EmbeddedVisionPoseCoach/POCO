@@ -1,33 +1,48 @@
+import mediapipe as mp
 import cv2
-import config
 
 class Visualizer:
-    def draw(self, frame, face_res, pose_res, fps):
-        # Pose 그리기
-        if pose_res.pose_landmarks:
-            for landmarks in pose_res.pose_landmarks:
-                for lm in landmarks:
-                    cv2.circle(frame, (int(lm.x * config.FRAME_WIDTH), int(lm.y * config.FRAME_HEIGHT)), 2, (0, 255, 0), -1)
-                for conn in config.POSE_CONNECTIONS:
-                    p1, p2 = landmarks[conn[0]], landmarks[conn[1]]
-                    c1 = (int(p1.x * config.FRAME_WIDTH), int(p1.y * config.FRAME_HEIGHT))
-                    c2 = (int(p2.x * config.FRAME_WIDTH), int(p2.y * config.FRAME_HEIGHT))
-                    cv2.line(frame, c1, c2, (0, 255, 0), 2)
-
-        # Face 그리기
-        if face_res.face_landmarks:
-            for landmarks in face_res.face_landmarks:
-                for lm in landmarks:
-                    cv2.circle(frame, (int(lm.x * config.FRAME_WIDTH), int(lm.y * config.FRAME_HEIGHT)), 1, (255, 255, 255), -1)
-
-        # Blendshapes 및 FPS
-        self.render_blendshapes(frame, face_res.face_blendshapes)
-        cv2.putText(frame, f"{fps:.1f}", (config.FRAME_HEIGHT, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2)
-
-    def render_blendshapes(self, canvas, blendshapes):
-        if not blendshapes or len(blendshapes) == 0: return
-        for i, cat in enumerate(blendshapes[0]):
-            if i > 25: break
-            y = 30 + i * 15
-            cv2.putText(canvas, cat.category_name, (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.3, (255, 255, 255), 1)
-            cv2.rectangle(canvas, (130, y-8), (130 + int(cat.score * 150), y), (0, 255, 0), -1)
+    def __init__(self):
+        # 1. MediaPipe 그리기 도구 및 포즈 연결 정보 초기화
+        self.mp_pose = mp.solutions.pose
+        self.mp_face_mesh = mp.solutions.face_mesh  # 얼굴 그물망 모듈 추가
+        self.mp_drawing = mp.solutions.drawing_utils
+        
+        # 2. 선과 점의 스타일 설정 (이 부분이 있어야 에러가 안 납니다)
+        # 점(Dot) 스타일: 초록색, 두께 2, 반지름 2
+        self.pose_dot_spec = self.mp_drawing.DrawingSpec(
+            color=(0, 255, 0), thickness=2, circle_radius=2
+        )
+        # 선(Connection) 스타일: 빨간색, 두께 2
+        self.pose_con_spec = self.mp_drawing.DrawingSpec(
+            color=(0, 0, 255), thickness=2
+        )
+        # 3. 얼굴(Face Mesh) 그리기 스타일 설정
+        # 선(Connection): 하늘색(Cyan), 두께 1, 점은 그리지 않음
+        self.face_spec = self.mp_drawing.DrawingSpec(
+            color=(255, 255, 0), thickness=1, circle_radius=1
+        )
+        
+    def draw_landmarks(self, frame, pose_landmarks, face_landmarks=None):
+        """
+        웹캠 프레임 위에 MediaPipe Pose 랜드마크와 연결선을 그립니다.
+        """
+        if pose_landmarks:
+            # 병현님이 작성하신 코드의 로직을 그대로 유지하되, 
+            # 위에서 초기화한 속성들을 사용하여 그립니다.
+            self.mp_drawing.draw_landmarks(
+                image=frame,
+                landmark_list=pose_landmarks,
+                connections=self.mp_pose.POSE_CONNECTIONS,
+                landmark_drawing_spec=self.pose_dot_spec,
+                connection_drawing_spec=self.pose_con_spec
+            )
+        
+        if face_landmarks:
+            self.mp_drawing.draw_landmarks(
+                image=frame,
+                landmark_list=face_landmarks,
+                connections=self.mp_face_mesh.FACEMESH_CONTOURS,
+                landmark_drawing_spec=None, # 점은 생략하고 선만 그림
+                connection_drawing_spec=self.face_spec
+            )
