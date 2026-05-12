@@ -40,7 +40,7 @@ VisionPoseCoach는 사용자의 앉은 자세를 실시간으로 분석하고, �
 # 2. Team Members (팀원 및 팀 소개)
 | 조병현 | 신동민 | 이종현 | 최은비 |
 |:------:|:------:|:------:|:------:|
-| <img src="https://github.com/VisionAITeamProject/ImageUploadRepo/blob/4786246569c1237d3ee9a73786d18f3fbdaa8efe/byunghyun.png" alt="조병현" width="150" height="150" > | <img src="https://github.com/VisionAITeamProject/ImageUploadRepo/blob/525a65bd8bcf20387ab53856dfa0d6694551d765/YouYou.jpg" alt="신동민" width="150" height="150"> | <img src="https://github.com/user-attachments/assets/89f05e5a-b0ce-45b3-8a48-5174570ca30c" alt="이종현" width="150" height="150"> | <img src="https://github.com/VisionAITeamProject/ImageUploadRepo/blob/2cd3711948bca333d3e7c517373cbf9463c5b163/eun.png" alt="최은비" width="150" height="150"> |
+| <img src="https://github.com/VisionAITeamProject/ImageUploadRepo/blob/4786246569c1237d3ee9a73786d18f3fbdaa8efe/byunghyun.png" alt="조병현" width="150" height="150" > | <img src="https://github.com/VisionAITeamProject/ImageUploadRepo/blob/525a65bd8bcf20387ab53856dfa0d6694551d765/YouYou.jpg" alt="신동민" width="150" height="150"> | <img src="https://github.com/VisionAITeamProject/ImageUploadRepo/blob/main/jhprf.jpeg" alt="이종현" width="150" height="150"> | <img src="https://github.com/VisionAITeamProject/ImageUploadRepo/blob/2cd3711948bca333d3e7c517373cbf9463c5b163/eun.png" alt="최은비" width="150" height="150"> |
 
 <br/>
 <br/>
