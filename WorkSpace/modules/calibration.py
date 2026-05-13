@@ -1,7 +1,7 @@
 import time
 import numpy as np
 import cv2
-import config
+import modules.config as config
 
 class PoseCalibrator:
     def __init__(self):

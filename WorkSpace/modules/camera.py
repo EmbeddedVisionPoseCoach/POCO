@@ -1,6 +1,6 @@
 import cv2
 import threading
-import config
+import modules.config as config
 
 class CameraStream:
     def __init__(self, src=0):

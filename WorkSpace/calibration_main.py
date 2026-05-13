@@ -6,10 +6,10 @@ import os
 import mediapipe as mp
 
 # 병현님의 기존 모듈들
-from camera import CameraStream
-from features import calculate_features
-from visualizer import Visualizer
-import config
+from modules.camera import CameraStream
+from modules.features import calculate_features
+from modules.visualizer import Visualizer
+import modules.config as config
 
 def main():
     # 1. 초기 설정

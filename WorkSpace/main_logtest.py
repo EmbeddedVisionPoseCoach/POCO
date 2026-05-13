@@ -3,6 +3,8 @@ import numpy as np
 import joblib
 import os
 import mediapipe as mp
+from collections import deque
+from modules.logger import StudyLogger  # 로그 기록 모듈 추가
 
 
 # TFLite 런타임 (라즈베리 파이 최적화용)
@@ -63,6 +65,9 @@ def main():
     viz = Visualizer()
     # config.py에 정의된 경로 사용
     engine = TFLiteEngine(config.MODEL_PATH, config.SCALER_PATH, config.BASELINE_PATH)
+    
+    # 로그 기록을 위한 StudyLogger 인스턴스 생성
+    logger = StudyLogger()
 
     # 2. MediaPipe 탐지기 설정
     mp_pose = mp.solutions.pose
@@ -88,6 +93,8 @@ def main():
     }
 
     print("🚀 실시간 자세 분석 시스템 가동 중... (추론 모드)")
+
+    prediction_queue = deque(maxlen=20)
 
     try:
         while True:
@@ -118,22 +125,44 @@ def main():
                 landmark_list = [results_pose.pose_landmarks.landmark]
                 raw_features = calculate_features(landmark_list)
                 
+                hand_visible = raw_features[-1]  
+
+                
+
                 if any(raw_features):
                     # [AI 추론] 모든 클래스의 확률값 획득
                     probs = engine.predict(raw_features)
-                    
+                    if hand_visible == 0:
+                        probs[3] = 0
                     # 가장 높은 확률 정보 추출 (메인 화면 표시용)
                     class_idx = np.argmax(probs)
+                    
                     confidence = probs[class_idx]
                     status_text = labels[class_idx]
                     status_color = colors[class_idx]
 
+                    prediction_queue.append(class_idx)
+                    final_label= max(set(prediction_queue), key=prediction_queue.count)
+                    final_status_text = labels[final_label]
+
+                    # --- [로그 저장 로직 추가] ---
+                    # data detail.png의 포즈 관련 데이터 매핑
+                    pose_log = {
+                        "posture_type": labels[final_label],
+                        "forward_head_ratio": float(probs[0]), # 예시: 피처 배열의 인덱스에 맞게 수정
+                        "chin_rest_score": float(probs[3]),           # 턱괸 확률을 점수로 활용
+                        "asymmetry_angle": float(raw_features[1])      # 예시: 피처 배열의 인덱스에 맞게 수정
+                    }
+                    logger.save(pose_log)
+                    # --------------------------
+                    
+                    
                     # [Visualizer] 모든 라벨의 확률 대시보드 생성 (별도 창)
                     dashboard = viz.draw_confidence_dashboard(probs, labels, colors)
 
                     # 메인 뷰 상단 상태 표시
-                    cv2.rectangle(frame, (0, 0), (380, 60), (0, 0, 0), -1)
-                    cv2.putText(frame, f"STATUS: {status_text} ({confidence*100:.1f}%)", (10, 40), 
+                    cv2.rectangle(frame, (0, 0), (120, 60), (0, 0, 0), -1)
+                    cv2.putText(frame, f"{final_status_text}", (10, 40), 
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.8, status_color, 2)
 
             # 두 개의 결과 창 출력

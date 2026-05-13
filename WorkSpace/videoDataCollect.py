@@ -5,7 +5,8 @@ import mediapipe as mp
 import numpy as np
 from datetime import datetime
 from tqdm import tqdm
-from features import calculate_features # 함수명 확인
+from modules.features import calculate_features # 함수명 확인
+from modules.features import FEATURE_NAMES # 피처 이름 리스트 추가
 
 def main():
     # 1. 설정 및 경로
@@ -89,7 +90,7 @@ def main():
         filepath = os.path.join(save_folder, filename)
         
         # 헤더 정의 (12개 피처 + Label)
-        header = ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12", "Label"]
+        header = FEATURE_NAMES + ["Label"]
         
         with open(filepath, 'w', newline='', encoding='utf-8-sig') as f:
             writer = csv.writer(f)

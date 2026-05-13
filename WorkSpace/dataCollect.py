@@ -5,10 +5,10 @@ import os
 from datetime import datetime
 
 # 기존에 작성한 모듈들을 임포트합니다.
-from camera import CameraStream
+from modules.camera import CameraStream
 from detector import LandmarkerDetector
-from visualizer import Visualizer
-from features import calculate_8_features
+from modules.visualizer import Visualizer
+from modules.features import calculate_features
 import mediapipe as mp
 
 def main():
@@ -75,11 +75,11 @@ def main():
 
             # 랜드마크 탐지 및 8대 핵심 피처 계산
             face_res, pose_res = detector.detect(mp_image)
-            current_features = calculate_8_features(pose_res.pose_landmarks)
+            current_features = calculate_features(pose_res.pose_landmarks)
             
             # 포즈가 정상적으로 탐지된 프레임만 데이터 리스트에 추가
             if pose_res.pose_landmarks:
-                # [F1, F2, F3, F4, F5, F6, F7, F8, Label] 형태의 한 행 구성
+                # [F1, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, Label] 형태의 한 행 구성
                 row = current_features + [label]
                 data_list.append(row)
 
@@ -120,7 +120,7 @@ def main():
             filepath = os.path.join(save_folder, filename)
             
             # CSV 파일 작성 (한글 깨짐 방지를 위해 utf-8-sig 사용)
-            header = ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "Label"]
+            header = ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "Label"]
             with open(filepath, 'w', newline='', encoding='utf-8-sig') as f:
                 writer = csv.writer(f)
                 writer.writerow(header)

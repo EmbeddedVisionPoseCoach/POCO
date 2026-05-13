@@ -1,10 +1,12 @@
 import cv2
 import numpy as np
 import mediapipe as mp
-from camera import CameraStream
-from features import calculate_features
-from visualizer import Visualizer
-import config
+from modules.camera import CameraStream
+from modules.features import calculate_features
+from modules.visualizer import Visualizer
+import modules.config as config
+from modules.features import FEATURE_NAMES
+
 
 def draw_feature_bar_dashboard(features):
     """
@@ -14,12 +16,9 @@ def draw_feature_bar_dashboard(features):
     width, height = 750, 600
     db = np.zeros((height, width, 3), dtype=np.uint8)
     
-    feature_names = [
-        "Neck Vert Ratio", "Hand-Face Prox", "Shoulder Tilt",
-        "Head Roll Ang", "Nose-Shld Hgt", "Center Offset",
-        "Eye-Ear Horiz", "Fwd Head Scale", "Hand-Eye Dist",
-        "Hand-Nose Dist", "Hand Visible", "Ear-Shld Gap" # F12 추가
-    ]
+    num_features=len(FEATURE_NAMES)
+
+    
 
     cv2.putText(db, "--- RAW Feature Dashboard ---", (20, 40), 
                 cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
@@ -30,9 +29,10 @@ def draw_feature_bar_dashboard(features):
     bar_x = 350        # 막대 시작
     max_bar_width = 350
 
-    for i, (name, val) in enumerate(zip(feature_names, features)):
+    for i, name in enumerate(FEATURE_NAMES):
         y_pos = 100 + (i * 45)
-        
+        val=features[i]
+
         # 1. 피처 이름 (왼쪽 정렬)
         cv2.putText(db, f"F{i+1}. {name}", (name_x, y_pos - 10), 
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)

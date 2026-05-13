@@ -5,8 +5,8 @@ FRAME_WIDTH = 320
 FRAME_HEIGHT = 240
 
 # 모델 경로
-FACE_MODEL_PATH = "face_landmarker.task"
-POSE_MODEL_PATH = "pose_landmarker_heavy.task"
+FACE_MODEL_PATH = "tasks/face_landmarker.task"
+POSE_MODEL_PATH = "tasks/pose_landmarker_heavy.task"
 
 # 학습시킨 모델 경로
 MODEL_PATH = 'saved_model/posture_model.tflite'
