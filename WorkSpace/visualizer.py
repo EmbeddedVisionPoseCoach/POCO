@@ -1,5 +1,6 @@
 import mediapipe as mp
 import cv2
+import numpy as np
 
 class Visualizer:
     def __init__(self):
@@ -46,3 +47,65 @@ class Visualizer:
                 landmark_drawing_spec=None, # 점은 생략하고 선만 그림
                 connection_drawing_spec=self.face_spec
             )
+
+    
+    def draw_confidence_dashboard(self, prediction, labels, colors):
+        """모든 라벨의 Confidence를 바 차트 형태로 그리는 대시보드 생성"""
+        width, height = 600, 400
+        db = np.zeros((height, width, 3), dtype=np.uint8)
+        margin = 40
+        bar_height = 50
+        gap = 30
+        
+        cv2.putText(db, "Analysis Details (All Confidences)", (margin, 50), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2)
+
+        for i in range(len(labels)):
+            label_text = labels[i]
+            conf = prediction[i]
+            color = colors[i]
+            y_pos = 100 + i * (bar_height + gap)
+            
+            # 클래스 이름 및 확률 텍스트
+            text_display = f"{label_text}: {conf*100:.1f}%"
+            cv2.putText(db, text_display, (margin, y_pos - 10), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 1)
+            
+            # 확률 바 배경 (회색)
+            cv2.rectangle(db, (margin, y_pos), (width - margin, y_pos + bar_height), (50, 50, 50), -1)
+            
+            # 실제 확률 바 (클래스 색상)
+            filled_width = int((width - 2 * margin) * conf)
+            cv2.rectangle(db, (margin, y_pos), (margin + filled_width, y_pos + bar_height), color, -1)
+
+        return db
+
+    
+    def draw_calibration_ui(self, frame, elapsed, total):
+        """교정 단계 전용 UI: 프로그레스 바와 안내 메시지"""
+        h, w, _ = frame.shape
+        progress = min(elapsed / total, 1.0)
+        
+        # 1. 상단 안내 영역 (반투명 검정 바)
+        cv2.rectangle(frame, (0, 0), (w, 100), (0, 0, 0), -1)
+        
+        # 안내 텍스트
+        msg = "PLEASE MAINTAIN OPTIMAL POSTURE"
+        cv2.putText(frame, msg, (int(w*0.1), 45), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
+        
+        sub_msg = f"Calibrating... {elapsed:.1f}s / {total}s"
+        cv2.putText(frame, sub_msg, (int(w*0.1), 80), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 200, 200), 1)
+
+        # 2. 하단 프로그레스 바
+        bar_x1, bar_x2 = int(w*0.1), int(w*0.9)
+        bar_y = h - 40
+        cv2.rectangle(frame, (bar_x1, bar_y), (bar_x2, bar_y + 15), (50, 50, 50), -1)
+        
+        filled_w = int((bar_x2 - bar_x1) * progress)
+        cv2.rectangle(frame, (bar_x1, bar_y), (bar_x1 + filled_w, bar_y + 15), (0, 255, 0), -1)
+
+        # 3. 바른 자세 가이드라인 (어깨선 수평 가이드 등 시각적 보조)
+        # 중앙 수직선
+        cv2.line(frame, (int(w/2), 120), (int(w/2), h-80), (100, 100, 100), 1, cv2.LINE_AA)

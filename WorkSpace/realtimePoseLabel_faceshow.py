@@ -10,113 +10,142 @@ try:
 except ImportError:
     import tensorflow.lite as tflite
 
-# 병현님의 실제 파일들에서 함수와 클래스 임포트
+# 병현님의 모듈들 임포트
 from camera import CameraStream
-from features import calculate_8_features
+from features import calculate_features  # 11개 피처 버전
 from visualizer import Visualizer
 import config 
 
 class TFLiteEngine:
-    def __init__(self, model_path, scaler_path):
+    """TFLite 모델 로드 및 추론 엔진"""
+    def __init__(self, model_path, scaler_path, baseline_path):
+        # 스케일러 로드
         self.scaler = joblib.load(scaler_path)
+        
+        # TFLite 인터프리터 설정
         self.interpreter = tflite.Interpreter(model_path=model_path)
         self.interpreter.allocate_tensors()
+        
+        # 입출력 텐서 인덱스 확보
         self.input_details = self.interpreter.get_input_details()
         self.output_details = self.interpreter.get_output_details()
-        
+
+        # 초기 자세 기준값(Baseline) 로드
+        self.baseline = self.load_baseline(baseline_path)
+
+    def load_baseline(self, path):
+        if os.path.exists(path):
+            print(f"✅ 기준값 로드 완료: {path}")
+            return joblib.load(path)
+        else:
+            print("⚠️ 기준값 파일이 없어 모든 피처를 0으로 초기화합니다.")
+            return np.zeros(11) # 피처가 11개인 경우
+
     def predict(self, raw_features):
-        features_np = np.array(raw_features).reshape(1, -1)
+        """11개 피처를 입력받아 각 클래스별 확률 배열을 반환"""
+        # 피처를 numpy 배열로 변환 (1, 11) 및 스케일링
+        relative_features = np.array(raw_features) - self.baseline
+        
+        # 스케일링 적용
+        features_np = relative_features.reshape(1, -1)
         scaled_data = self.scaler.transform(features_np).astype(np.float32)
         
+        # TFLite 추론 실행
         self.interpreter.set_tensor(self.input_details[0]['index'], scaled_data)
         self.interpreter.invoke()
+        
         return self.interpreter.get_tensor(self.output_details[0]['index'])[0]
 
 def main():
-    # 1. 파일 경로 설정
-    MODEL_PATH = 'saved_model/posture_model.tflite'
-    SCALER_PATH = 'saved_model/posture_scaler.pkl'
-    
-    # 2. 인스턴스 초기화
+    # 1. 인스턴스 초기화
     cam = CameraStream(src=0).start() 
     viz = Visualizer()
-    engine = TFLiteEngine(MODEL_PATH, SCALER_PATH)
+    # config.py에 정의된 경로 사용
+    engine = TFLiteEngine(config.MODEL_PATH, config.SCALER_PATH, config.BASELINE_PATH)
 
-    # 3. MediaPipe 초기화
+    # 2. MediaPipe 탐지기 설정
     mp_pose = mp.solutions.pose
-    mp_face_mesh = mp.solutions.face_mesh  # Face Mesh 모듈 추가
+    mp_face_mesh = mp.solutions.face_mesh
     
     pose_detector = mp_pose.Pose(
         min_detection_confidence=0.5, 
         min_tracking_confidence=0.5
     )
-    
-    # 정밀한 얼굴 랜드마크 추출을 위한 설정
     face_detector = mp_face_mesh.FaceMesh(
-        max_num_faces=1,
-        refine_landmarks=True,
-        min_detection_confidence=0.5,
-        min_tracking_confidence=0.5
+        max_num_faces=1, 
+        refine_landmarks=True
     )
 
-    labels = {0: "Optimal", 1: "Forward Head", 2: "Asymmetric", 3: "Chin Propping"}
-    colors = {0: (0, 255, 0), 1: (0, 165, 255), 2: (255, 191, 0), 3: (0, 0, 255)}
+    # 3. 라벨 및 색상 정의 (학습 시 인덱스 순서와 일치해야 함)
+    # 0: 정자세, 1: 비대칭, 2: 거북목, 3: 턱굄 (예시 순서)
+    labels = {0: "Optimal", 1: "Asymmetric", 2: "Forward Head", 3: "Chin Propping"}
+    colors = {
+        0: (0, 255, 0),      # Green
+        1: (255, 191, 0),    # Blue-Green
+        2: (0, 165, 255),    # Orange
+        3: (0, 0, 255)       # Red
+    }
 
-    print("🚀 실시간 자세 및 안면 분석 엔진 가동 중... (종료: ESC)")
+    print("🚀 실시간 자세 분석 시스템 가동 중... (추론 모드)")
 
     try:
         while True:
+            # 프레임 읽기
             frame = cam.read()
             if frame is None:
                 continue
 
-            # 전처리
+            # 전처리 (좌우 반전 및 RGB 변환)
             frame = cv2.flip(frame, 1)
             img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             
-            # 랜드마크 추출 (포즈 & 얼굴)
+            # 랜드마크 추론
             results_pose = pose_detector.process(img_rgb)
             results_face = face_detector.process(img_rgb)
 
-            dashboard = np.zeros((300, 500, 3), dtype=np.uint8)
+            # 기본 빈 대시보드 생성 (데이터 없을 때 표시용)
+            dashboard = np.zeros((400, 600, 3), dtype=np.uint8)
+            cv2.putText(dashboard, "Waiting for Pose Detection...", (50, 200), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (200, 200, 200), 1)
             
             if results_pose.pose_landmarks:
-                # 얼굴 랜드마크 존재 여부 확인
+                # [Visualizer] 뼈대 및 얼굴 그물망 그리기
                 face_lms = results_face.multi_face_landmarks[0] if results_face.multi_face_landmarks else None
-                
-                # [Visualizer] 포즈와 얼굴 랜드마크를 동시에 시각화
                 viz.draw_landmarks(frame, results_pose.pose_landmarks, face_lms)
                 
-                # [Features] 8개 피처 계산
+                # [Features] 11개 피처 추출
                 landmark_list = [results_pose.pose_landmarks.landmark]
-                raw_features = calculate_8_features(landmark_list)
+                raw_features = calculate_features(landmark_list)
                 
                 if any(raw_features):
+                    # [AI 추론] 모든 클래스의 확률값 획득
                     probs = engine.predict(raw_features)
+                    
+                    # 가장 높은 확률 정보 추출 (메인 화면 표시용)
                     class_idx = np.argmax(probs)
                     confidence = probs[class_idx]
-                    
                     status_text = labels[class_idx]
                     status_color = colors[class_idx]
 
-                    # 대시보드 UI 업데이트
-                    cv2.putText(dashboard, "AI POSTURE & FACE ANALYSIS", (20, 40), 
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 200, 200), 1)
-                    cv2.rectangle(dashboard, (20, 60), (480, 180), status_color, -1)
-                    cv2.putText(dashboard, status_text, (40, 140), 
-                                cv2.FONT_HERSHEY_SIMPLEX, 1.5, (255, 255, 255), 3)
-                    cv2.putText(dashboard, f"Confidence: {confidence*100:.1f}%", (20, 240), 
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 1)
+                    # [Visualizer] 모든 라벨의 확률 대시보드 생성 (별도 창)
+                    dashboard = viz.draw_confidence_dashboard(probs, labels, colors)
 
-                    cv2.putText(frame, f"STATUS: {status_text}", (10, 50), 
-                                cv2.FONT_HERSHEY_SIMPLEX, 1.2, status_color, 2)
+                    # 메인 뷰 상단 상태 표시
+                    cv2.rectangle(frame, (0, 0), (380, 60), (0, 0, 0), -1)
+                    cv2.putText(frame, f"STATUS: {status_text} ({confidence*100:.1f}%)", (10, 40), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.8, status_color, 2)
 
-            cv2.imshow('Inference View', frame)
-            cv2.imshow('Status Dashboard', dashboard)
+            # 두 개의 결과 창 출력
+            cv2.imshow('Landmark View', frame)
+            cv2.imshow('Confidence Analysis', dashboard)
 
+            # ESC 키를 누르면 종료
             if cv2.waitKey(1) & 0xFF == 27:
                 break
+                
     finally:
+        # 자원 해제
+        print("🔌 시스템을 종료합니다.")
         cam.stop()
         cv2.destroyAllWindows()
 
