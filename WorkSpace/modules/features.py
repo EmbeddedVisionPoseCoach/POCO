@@ -7,6 +7,31 @@ FEATURE_NAMES = [
      "Hand Visible", 
 ]  # 현재 피쳐 10개
 
+MODEL_FEATURE_ORDER = [
+    "eye_blink_left_mean",
+    "eye_blink_left_std",
+    "eye_blink_left_max",
+    "eye_blink_left_min",
+
+    "eye_blink_right_mean",
+    "eye_blink_right_std",
+    "eye_blink_right_max",
+    "eye_blink_right_min",
+
+    "eye_closed_score_mean",
+    "eye_closed_score_std",
+    "eye_closed_score_max",
+    "eye_closed_score_min",
+
+    "jaw_open_mean",
+    "jaw_open_std",
+    "jaw_open_max",
+    "jaw_open_min",
+] # 얼굴용 피쳐 16개
+
+# ----------------------------------------------------------------
+# 포즈용 피처 계산 함수
+# ----------------------------------------------------------------
 
 def calculate_features(pose_landmarks, face_landmarks=None):
     # 포즈 랜드마크가 없으면 모든 피처를 0으로 초기화하여 반환
@@ -135,8 +160,197 @@ def calculate_features(pose_landmarks, face_landmarks=None):
     
     return [f1, f2, f3, f4, f5, f6, f7, f8, f9, f10]
 
-def calculate_face_features():
+# ----------------------------------------------------------------
+# 얼굴용 피처 계산 함수
+# ----------------------------------------------------------------
+
+def calculate_face_feature(blendshape_window) :
+    """
+    30초 동안 모은 MediaPipe face_blendshapes 값을 받아서
+    모델 입력용 최종 16개 feature 리스트로 변환한다.
+
+    Parameters
+    ----------
+    blendshape_window:
+        30초 동안 모은 프레임별 face_blendshapes 리스트.
+
+        권장 형태:
+            [
+                face_res.face_blendshapes[0],
+                face_res.face_blendshapes[0],
+                face_res.face_blendshapes[0],
+                ...
+            ]
+
+        즉, face_res 전체를 넣는 것이 아니라
+        매 프레임마다 face_res.face_blendshapes[0]만 저장해서 넣는다.
+
+    Returns
+    -------
+    Optional[List[float]]
+
+        정상 계산:
+            16개 feature 리스트 반환
+
+        계산 불가:
+            None 반환
+
+    최종 반환 순서:
+        MODEL_FEATURE_ORDER와 동일하다.
+    """
+
+    # ------------------------------------------------------------
+    # 1. 입력값 검사
+    # ------------------------------------------------------------
+    if blendshape_window is None or len(blendshape_window) == 0:
+        return None
+
+    # ------------------------------------------------------------
+    # 2. 30초 동안의 프레임별 값 저장 리스트
+    # ------------------------------------------------------------
+    eye_blink_left_values = []
+    eye_blink_right_values = []
+    eye_closed_score_values = []
+    jaw_open_values = []
+
+    # ------------------------------------------------------------
+    # 3. 프레임별 blendshape 처리
+    # ------------------------------------------------------------
+    for blendshapes in blendshape_window:
+
+        # 얼굴이 인식되지 않은 프레임을 None으로 저장한 경우 무시
+        if blendshapes is None:
+            continue
+
+        # MediaPipe blendshape 리스트를 딕셔너리로 변환
+        scores = _blendshapes_to_score_dict(blendshapes)
+
+        if len(scores) == 0:
+            continue
+
+        # --------------------------------------------------------
+        # MediaPipe 원본 blendshape 이름 기준으로 값 추출
+        # --------------------------------------------------------
+        eye_blink_left = scores.get("eyeBlinkLeft", 0.0)
+        eye_blink_right = scores.get("eyeBlinkRight", 0.0)
+        jaw_open = scores.get("jawOpen", 0.0)
+
+        # 양쪽 눈 감김 정도 평균
+        eye_closed_score = (eye_blink_left + eye_blink_right) / 2.0
+
+        # 리스트에 저장
+        eye_blink_left_values.append(float(eye_blink_left))
+        eye_blink_right_values.append(float(eye_blink_right))
+        eye_closed_score_values.append(float(eye_closed_score))
+        jaw_open_values.append(float(jaw_open))
+
+    # ------------------------------------------------------------
+    # 4. 유효 프레임이 없으면 계산 불가
+    # ------------------------------------------------------------
+    if len(eye_blink_left_values) == 0:
+        return None
+
+    # ------------------------------------------------------------
+    # 5. 30초 단위 통계 feature 계산
+    # ------------------------------------------------------------
+    feature_dict = {
+        "eye_blink_left_mean": _mean(eye_blink_left_values),
+        "eye_blink_left_std": _std(eye_blink_left_values),
+        "eye_blink_left_max": max(eye_blink_left_values),
+        "eye_blink_left_min": min(eye_blink_left_values),
+
+        "eye_blink_right_mean": _mean(eye_blink_right_values),
+        "eye_blink_right_std": _std(eye_blink_right_values),
+        "eye_blink_right_max": max(eye_blink_right_values),
+        "eye_blink_right_min": min(eye_blink_right_values),
+
+        "eye_closed_score_mean": _mean(eye_closed_score_values),
+        "eye_closed_score_std": _std(eye_closed_score_values),
+        "eye_closed_score_max": max(eye_closed_score_values),
+        "eye_closed_score_min": min(eye_closed_score_values),
+
+        "jaw_open_mean": _mean(jaw_open_values),
+        "jaw_open_std": _std(jaw_open_values),
+        "jaw_open_max": max(jaw_open_values),
+        "jaw_open_min": min(jaw_open_values),
+    }
+
+    # ------------------------------------------------------------
+    # 6. 학습 때 사용한 순서대로 리스트 생성
+    # ------------------------------------------------------------
+    final_features = [
+        float(feature_dict[name])
+        for name in MODEL_FEATURE_ORDER
+    ]
+
+    return final_features
+# ----------------------------------------------------------------
+# Face Feature 계산에 필요한 보조 함수들 
+# ----------------------------------------------------------------
+
+def _blendshapes_to_score_dict(blendshapes):
+    """
+    MediaPipe face_blendshapes 값을
+    {category_name: score} 형태로 변환한다.
+    """
+
+    # 테스트용으로 dict가 바로 들어오는 경우도 허용
+    if isinstance(blendshapes, dict):
+        return {
+            str(name): float(score)
+            for name, score in blendshapes.items()
+        }
+
+    scores = {}
+
+    for category in blendshapes:
+        try:
+            name = category.category_name
+            score = category.score
+            scores[name] = float(score)
+        except AttributeError:
+            continue
+
+    return scores
 
 
+def _mean(values) :
+    """
+    평균 계산 함수
+    """
 
-    return [f1, ..., f16]
+    if len(values) == 0:
+        return 0.0
+
+    return sum(values) / len(values)
+
+
+def _std(values) :
+    """
+    표준편차 계산 함수
+
+    pandas std()와 동일하게 sample standard deviation 방식을 사용한다.
+    즉, n이 아니라 n-1로 나눈다.
+    """
+
+    n = len(values)
+
+    if n <= 1:
+        return 0.0
+
+    mean_value = _mean(values)
+
+    variance = sum(
+        (value - mean_value) ** 2
+        for value in values
+    ) / (n - 1)
+
+    return variance ** 0.5
+
+
+def get_feature_names() :
+    """
+    최종 모델 입력 feature 이름 16개 반환
+    """
+
+    return MODEL_FEATURE_ORDER.copy()

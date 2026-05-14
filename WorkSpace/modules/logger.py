@@ -10,16 +10,10 @@ class StudyLog:
     timestamp: str
     elapsed_sec: int
     posture_type: str
-    forward_head_ratio: float
-    chin_rest_score: float
-    asymmetry_angle: float
+    
     # 얼굴 데이터 (현재 미구현 - 0으로 초기화)
     fatigue_label: str = "Normal"
-    eye_closed_ratio: float = 0.0
-    eye_closed_duration: float = 0.0
-    mouth_open_ratio: float = 0.0
-    yawn_detected: bool = False
-    yawn_event_count: int = 0
+    fatigue_probability: float = 0.0
 
     @classmethod
     def get_field_names(cls):
