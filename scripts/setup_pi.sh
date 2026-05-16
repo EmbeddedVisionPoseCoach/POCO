@@ -75,8 +75,8 @@ pip install "opencv-python==4.10.0.84" "opencv-contrib-python==4.10.0.84"
 pip install "mediapipe==0.10.14" "jax<0.4.20" "jaxlib<0.4.20" "ml-dtypes~=0.2.0" "pandas==2.1.4" cvzone h5py ai-edge-litert
 
 # [6/10] Streamlit 리포트 및 데이터 분석 라이브러리 설치
-echo "[6/10] Streamlit, Plotly, Joblib, Scikit-learn 설치..."
-pip install plotly streamlit joblib scikit-learn
+echo "[6/10] Streamlit, Plotly, Joblib, Scikit-learn, PySerial 설치..."
+pip install plotly streamlit joblib scikit-learn pyserial
 
 # [7/10] NumPy 버전 고정
 echo "[7/10] NumPy 버전 최적화 (1.x 고정)..."
@@ -112,7 +112,7 @@ sudo fc-cache -fv || true
 echo "=========================================="
 echo "          최종 환경 구축 완료 목록"
 echo "=========================================="
-pip list | grep -E "tensorflow|tflite|opencv|mediapipe|numpy|PyQt5|pandas|plotly|streamlit|joblib|scikit-learn|sklearn" || true
+pip list | grep -E "tensorflow|tflite|opencv|mediapipe|numpy|PyQt5|pandas|plotly|streamlit|joblib|scikit-learn|sklearn|pyserial" || true
 echo "=========================================="
 echo "모든 설치가 완료되었습니다!"
 echo "사용법: source .venv/bin/activate"
