@@ -1,0 +1,58 @@
+{
+    "required_columns": [
+        "timestamp",
+        "elapsed_sec",
+        "posture_type",
+        "fatigue_label",
+        "fatigue_probability"
+    ],
+    "numeric_columns": [
+        "elapsed_sec",
+        "fatigue_probability"
+    ],
+    "bool_columns": [],
+    "allowed_posture_types": [
+        "Optimal",
+        "Forward Head",
+        "Chin Propping",
+        "Asymmetric"
+    ],
+    "good_posture_label": "Optimal",
+    "bad_posture_labels": [
+        "Forward Head",
+        "Chin Propping",
+        "Asymmetric"
+    ],
+    "allowed_fatigue_labels": [
+        "Normal",
+        "Drowsy"
+    ],
+    "normal_fatigue_label": "Normal",
+    "drowsy_label": "Drowsy",
+    "posture_display_names": {
+        "Optimal": "정자세",
+        "Forward Head": "거북목",
+        "Chin Propping": "턱괴기",
+        "Asymmetric": "비대칭"
+    },
+    "fatigue_display_names": {
+        "Normal": "정상",
+        "Drowsy": "피로 경고"
+    },
+    "posture_colors": {
+        "Optimal": "#19b87a",
+        "Forward Head": "#ff7a17",
+        "Chin Propping": "#f5a000",
+        "Asymmetric": "#f44444"
+    },
+    "fatigue_colors": {
+        "Normal": "#3d7ee8",
+        "Drowsy": "#8b5cf6"
+    },
+    "posture_tips": {
+        "Forward Head": "모니터와 얼굴 사이 거리를 유지하고 턱을 살짝 당겨보세요.",
+        "Chin Propping": "손으로 얼굴을 받치지 말고 손을 책상 위에 내려두세요.",
+        "Asymmetric": "양쪽 엉덩이에 체중을 고르게 싣고 어깨 높이를 맞춰보세요."
+    },
+    "default_posture_tip": "자세를 다시 바로잡고 잠깐 몸을 정렬해보세요."
+}

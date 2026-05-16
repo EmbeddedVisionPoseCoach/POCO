@@ -11,6 +11,12 @@ WINDOW_SEC = 30.0 # 30초 동안의 데이터 수집
 FACE_MODEL_PATH = "tasks/face_landmarker.task"
 POSE_MODEL_PATH = "tasks/pose_landmarker_heavy.task"
 
+# 피쳐 개수
+FACE_FEATURE_SIZE = 4
+POSE_FEATURE_SIZE = 10
+
+
+
 # 학습시킨 모델 경로
 MODEL_PATH = 'saved_model/posture_model.tflite'
 SCALER_PATH = 'saved_model/posture_scaler.pkl' # StandardScaler 객체 저장 경로
@@ -28,6 +34,7 @@ POSTURE_COLORS = {
     2: (0, 165, 255),    # Orange
     3: (0, 0, 255)       # Red
 }
+FACE_LABELS = {0 : "Normal", 1 : "Drowsy"}
 
 # 라벨링 측정 프레임 수
 LABEL_FRAME = 20
@@ -57,3 +64,18 @@ LABEL_MARGIN_X = 40
 
 DASHBOARD_WIDTH = 600
 DASHBOARD_HEIGHT = 400
+
+
+# GRU 용 상수
+WINDOW_SIZE = 60       # 모델이 요구하는 시퀀스 길이
+STRIDE = 5             # 추론 주기 (프레임 단위)
+
+# DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+
+
+MODEL_VERSION_MLP = "mlp"
+MODEL_VERSION_GRU = "gru"
+
+MODEL_VERSION = MODEL_VERSION_MLP
+# MODEL_VERSION = MODEL_VERSION_GRU

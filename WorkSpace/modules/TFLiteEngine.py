@@ -1,6 +1,7 @@
 import numpy as np
 import joblib
 import os
+import modules.config as config
 
 try:
     import tflite_runtime.interpreter as tflite
@@ -40,7 +41,7 @@ class TFLiteEngine:
             return joblib.load(path)
         else:
             print("⚠️ 기준값 파일이 없어 모든 피처를 0으로 초기화합니다.")
-            return np.zeros(11) # 피처가 11개인 경우
+            return np.zeros(config.POSE_FEATURE_SIZE)# 피처가 11개인 경우
 
     def predict(self, raw_features):
         """11개 피처를 입력받아 각 클래스별 확률 배열을 반환"""

@@ -36,7 +36,7 @@ MODEL_FEATURE_ORDER = [
 def calculate_features(pose_landmarks, face_landmarks=None):
     # 포즈 랜드마크가 없으면 모든 피처를 0으로 초기화하여 반환
     if not pose_landmarks:
-        return [0.0] * 8
+        return [0.0] * len(FEATURE_NAMES)
 
     lm = pose_landmarks[0]
 
@@ -354,3 +354,39 @@ def get_feature_names() :
     """
 
     return MODEL_FEATURE_ORDER.copy()
+
+def calculate_face_features_for_window(face_blendshapes_result):
+    """
+    MediaPipe Face Blendshapes 결과에서 eyeBlinkLeft, eyeBlinkRight, 
+    Blink 평균, jawOpen 4가지 피처를 추출하여 리스트로 반환합니다.
+    """
+    # 1. 결과 데이터가 유효한지 검증 (리스트가 비어있거나 감지가 안 된 경우 예외처리)
+    if not face_blendshapes_result or len(face_blendshapes_result) == 0:
+        return None
+
+    try:
+        # MediaPipe는 이미지 내 감지된 얼굴 수만큼 리스트로 결과를 반환하므로, 
+        # 첫 번째 얼굴([0])의 blendshapes 데이터를 가져옵니다.
+        first_face_blendshapes = face_blendshapes_result[0]
+        
+        # 2. 접근을 용이하게 하기 위해 { '블랜드쉐이프_이름': score_value } 형태의 딕셔너리 생성
+        blendshape_dict = {
+            category.category_name: category.score 
+            for category in first_face_blendshapes
+        }
+        
+        # 3. 원하는 특정 피처 값 추출 (정확한 MediaPipe 공식 명칭 기준)
+        # 만약 키가 없을 경우를 대비해 기본값 0.0 설정
+        eye_blink_left = blendshape_dict.get('eyeBlinkLeft', 0.0)
+        eye_blink_right = blendshape_dict.get('eyeBlinkRight', 0.0)
+        jaw_open = blendshape_dict.get('jawOpen', 0.0)
+        
+        # 4. 왼쪽, 오른쪽 블링크 값의 평균 계산
+        blink_average = (eye_blink_left + eye_blink_right) / 2.0
+        
+        # 5. 요청하신 순서대로 4개의 피처를 리스트로 조립하여 반환
+        return [eye_blink_left, eye_blink_right, blink_average, jaw_open]
+
+    except Exception as e:
+        print(f"Face feature extraction error: {e}")
+        return None

@@ -28,6 +28,9 @@ echo [4/5] 패키지 설치 시작...
 if exist requirements.txt pip install -r requirements.txt
 if exist requirements-win.txt pip install -r requirements-win.txt
 
+echo [추가] Streamlit 리포트 및 데이터 분석 패키지 설치 중...
+pip install pandas plotly streamlit joblib scikit-learn
+
 :: [추가] 텐서플로우 등 특정 버전 설치가 필요하다면 여기에 추가 가능
 :: pip install "opencv-python==4.10.0.84"
 
