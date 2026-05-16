@@ -27,6 +27,7 @@ from modules.visualizer import Visualizer
 from services.calibration_service import CalibrationService
 from services.mlp_inference_service import FrameInferenceService
 from services.gru_inference_service import GruInferenceService
+from services.hardware_controller import HardwareController
 
 class RunMode(Enum):
     """
@@ -43,8 +44,10 @@ class RunMode(Enum):
     """
 
     PREVIEW = auto()
+    HARDWARE = auto()
     CALIBRATING = auto()
     MEASURING = auto()
+    
 
 
 class CameraWorker(QThread):
@@ -66,6 +69,7 @@ class CameraWorker(QThread):
     - CameraStream은 main.py 테스트용으로만 유지한다.
     """
 
+    # 스레드로 돌리다보니 직접 전달은 레이스 컨디션이나 스케줄러에 의해서 제대로 전달이 안될 수 있음
     frame_changed = pyqtSignal(QImage)
     status_changed = pyqtSignal(str)
     calibration_finished = pyqtSignal(bool, str)
@@ -90,12 +94,23 @@ class CameraWorker(QThread):
             duration=config.CALIBRATION_TIME,
         )
 
+        # 하드웨어 컨트롤러
+        self.hardware_controller = HardwareController(
+            enabled=config.HARDWARE_ENABLED,
+            serial_port=config.HARDWARE_SERIAL_PORT,
+            baud_rate=config.HARDWARE_BAUD_RATE,
+            timeout=config.HARDWARE_TIMEOUT,
+        )
+
         self.inference_service = None
 
         # 버튼을 누른 시점에 worker가 아직 시작 전일 수 있으므로 pending 처리
         self.pending_preview_start = False
         self.pending_calibration_start = False
         self.pending_measurement_start = False
+
+        # 하드웨어 관련 변수
+        self.HarwareInit_requested = False
 
         # 상태 메시지 너무 자주 emit하지 않기 위한 변수
         self.last_status_emit_time = 0.0
@@ -279,10 +294,14 @@ class CameraWorker(QThread):
             self.status_changed.emit("카메라 준비 중입니다. 준비되면 초기 측정을 시작합니다.")
             return
 
-        self.mode = RunMode.CALIBRATING
 
-        result = self.calibration_service.start()
-        self.status_changed.emit(result.message)
+        # 하드웨어 모드 진입
+        self.mode = RunMode.HARDWARE
+        self.HarwareInit_requested = True
+        self.status_changed.emit("카메라 수평 보정을 시작합니다.")
+
+        # result = self.calibration_service.start()
+        # self.status_changed.emit(result.message)
 
     def start_measurement(self):
         """
@@ -342,7 +361,6 @@ class CameraWorker(QThread):
                 return
 
             self.mode = RunMode.MEASURING
-
             self.measurement_started.emit(True, start_result.message)
             self.status_changed.emit(start_result.message)
 
@@ -375,12 +393,41 @@ class CameraWorker(QThread):
         CALIBRATING :  calibrationMain.py를 수행한다 보시면 됩니다.
         MEASURING : 기존 main.py를 수행한다 보시면 됩니다.
         """
+        
+        if self.mode == RunMode.HARDWARE:
+            self.process_HardWare_then_calibration()
 
         if self.mode == RunMode.CALIBRATING:
             self.process_calibration(raw_features)
 
         elif self.mode == RunMode.MEASURING:
             self.process_measurement(raw_features, results_face)
+
+
+    def process_HardWare_then_calibration(self):
+        """
+        하드웨어 수평 보정 후 캘리브레이션을 시작한다.
+
+        이 함수는 CameraWorker 스레드 안에서 호출되므로
+        blocking 함수인 start_HardwareSet()을 실행해도 UI 메인 스레드는 멈추지 않는다.
+        """
+
+        if not self.HarwareInit_requested:
+            return
+
+        self.HarwareInit_requested = False
+
+        self.status_changed.emit("카메라 수평 보정 중입니다.")
+
+        hardware_success = self.hardware_controller.start_HardwareSet()
+
+        if not hardware_success:
+            self.status_changed.emit("수평 보정에 실패했거나 건너뛰었습니다.")
+
+        result = self.calibration_service.start()
+
+        self.mode = RunMode.CALIBRATING
+        self.status_changed.emit(result.message)
 
 
 
@@ -405,6 +452,7 @@ class CameraWorker(QThread):
         self.status_changed.emit(final_message)
         self.calibration_finished.emit(result.success, final_message)
 
+
     def process_measurement(self, raw_features, results_face):
         """
         추론 서비스에 feature와 face 결과를 넘기고 UI 결과를 emit한다.
@@ -418,6 +466,10 @@ class CameraWorker(QThread):
         if not result.success:
             self.emit_status_interval(result.message)
             return
+
+        # 하드웨어 제어는 UI emit 여부와 별개로 수행한다.
+        # get_posture_result_from_ai() 내부에서 3초 지속 여부와 중복 전송 방지를 처리한다.
+        self.hardware_controller.update_hardware(result)
 
         if not result.should_emit_ui:
             return
@@ -557,9 +609,15 @@ class CameraWorker(QThread):
             self.pose_detector.close()
             self.pose_detector = None
 
+        if self.hardware_controller is not None:
+            self.hardware_controller.close()
+
+
         if self.face_detector is not None:
             self.face_detector.close()
             self.face_detector = None
+
+            
 
         if show_message:
             self.status_changed.emit("카메라가 종료되었습니다.")
