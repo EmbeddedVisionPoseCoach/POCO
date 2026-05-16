@@ -133,17 +133,11 @@ class CameraWorker(QThread):
                 frame = cv2.flip(frame, 1)
                 img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
-                # MediaPipe Pose
+                mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=img_rgb )
+
+                # MediaPipe
                 results_pose = self.pose_detector.process(img_rgb)
-
-                # MediaPipe FaceLandmarker
-                mp_image = mp.Image(
-                    image_format=mp.ImageFormat.SRGB,
-                    data=img_rgb
-                )
-
                 results_face = self.face_detector.detect(mp_image)
-
                 raw_features = None
 
                 if results_pose.pose_landmarks:
@@ -378,6 +372,8 @@ class CameraWorker(QThread):
     def process_by_mode(self, raw_features, results_face):
         """
         현재 mode에 따라 feature를 처리한다.
+        CALIBRATING :  calibrationMain.py를 수행한다 보시면 됩니다.
+        MEASURING : 기존 main.py를 수행한다 보시면 됩니다.
         """
 
         if self.mode == RunMode.CALIBRATING:
@@ -386,9 +382,12 @@ class CameraWorker(QThread):
         elif self.mode == RunMode.MEASURING:
             self.process_measurement(raw_features, results_face)
 
+
+
     def process_calibration(self, raw_features):
         """
         CalibrationService에 feature를 넘겨 baseline을 수집한다.
+        update함수 : while에서 반복적으로 돌아가는부분을 Update에서 처리해줌
         """
 
         result = self.calibration_service.update(raw_features)

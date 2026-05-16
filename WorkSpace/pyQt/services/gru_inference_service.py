@@ -321,6 +321,10 @@ class GruInferenceService:
         label_index, confidence = self.parse_output(output)
         label = self.labels.get(label_index, f"Unknown({label_index})")
 
+        # print(f"Pose_Confidence : {confidence}")
+        # print(f"Pose_label_index : {label_index}")
+        # print(f"Pose_label : {label}")
+
         return label, confidence
 
     def predict_face(self):
@@ -342,6 +346,10 @@ class GruInferenceService:
 
         label_index, confidence = self.parse_output(output)
         label = self.face_labels.get(label_index, f"Unknown({label_index})")
+
+        # print(f"face_Confidence : {confidence}")
+        # print(f"face_label_index : {label_index}")
+        # print(f"face_label : {label}")
 
         return label, confidence
 
@@ -373,6 +381,7 @@ class GruInferenceService:
         # softmax 출력
         label_index = int(np.argmax(probs))
         confidence = float(probs[label_index])
+
 
         return label_index, confidence
 

@@ -84,6 +84,7 @@ class CalibrationService:
         elapsed = time.time() - self.start_time
         remain_time = max(0.0, self.duration - elapsed)
 
+        # 측정 시간 지나면 Finsh 호출해서 baseline으로 저장하는 부분입니다.
         if elapsed >= self.duration:
             return self.finish()
 

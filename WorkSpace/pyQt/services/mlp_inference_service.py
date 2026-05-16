@@ -45,6 +45,12 @@ class InferenceResult:
     elapsed_sec: int = 0
     rank_text: str = ""
 
+    """
+    하드웨어에 넘겨줄 값 지정해줬음
+    """
+    pose_index: int = 0
+    fatigue_index: int = 0
+
 
 class FrameInferenceService:
     """
@@ -112,6 +118,9 @@ class FrameInferenceService:
         # 피로도는 WINDOW_SEC마다 갱신되므로 최신 값을 계속 유지한다.
         self.latest_fatigue_label = "Normal"
         self.latest_fatigue_probability = 0.0
+        # 피로도 인덱스 지정
+        self.latest_fatigue_index = 0
+
 
         # 시간 / UI emit 제어
         self.session_start_time = None
@@ -267,6 +276,10 @@ class FrameInferenceService:
         posture_type = self.labels.get(final_label, f"Unknown({final_label})")
         confidence = float(probs[final_label])
 
+        # print(f"Pose_final_label : {final_label}")
+        # print(f"Pose_confidence : {confidence}")
+        # print(f"Pose_posture_type : {posture_type}")
+
         # 5. 불안정 자세 TOP3 누적
         normal_label = self.labels.get(0, "Optimal")
 
@@ -283,6 +296,9 @@ class FrameInferenceService:
                 fatigue_probability=self.latest_fatigue_probability,
             )
 
+        # print(f"Pose_Fiinal_Label {final_label}")
+        # print(f"Face_Fiinal_Label {self.latest_fatigue_index}")
+
         return InferenceResult(
             success=True,
             message=f"측정 중",
@@ -293,6 +309,8 @@ class FrameInferenceService:
             fatigue_probability=self.latest_fatigue_probability,
             elapsed_sec=elapsed_sec,
             rank_text=self.build_rank_text(),
+            pose_index=final_label,
+            fatigue_index=self.latest_fatigue_index
         )
 
     # ---------------------------------------------------------
@@ -313,12 +331,14 @@ class FrameInferenceService:
 
         elapsed = time.time() - self.face_window_start_time
 
+
+        ## Face 측정시간 계산-------------- ##
         if elapsed < config.WINDOW_SEC:
             return
 
         face_features = calculate_face_feature(self.blendshape_window)
 
-        # 다음 window를 위해 초기화
+        # 다음 계산을 위해 초기화해줌
         self.blendshape_window.clear()
         self.face_window_start_time = time.time()
 
@@ -337,6 +357,12 @@ class FrameInferenceService:
             label_index,
             "Drowsy" if label_index == 1 else "Normal"
         )
+
+        self.latest_fatigue_index = label_index
+
+        # print(f"face_latest_fatigue_label : {self.latest_fatigue_label}")
+        # print(f"face_label_index : {label_index}")
+        # print(f"face_probability : {probability}")
 
         self.latest_fatigue_probability = probability
 
