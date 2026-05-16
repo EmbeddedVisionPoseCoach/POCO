@@ -216,3 +216,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Streamlit / Report generated data
+WorkSpace/data/reports/*
+WorkSpace/data/session_log/*
