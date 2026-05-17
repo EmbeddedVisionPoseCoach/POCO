@@ -152,6 +152,61 @@ class HardwareController:
             return False
 
 
+    def set_hold_seconds(
+        self,
+        posture_seconds,
+        drowsy_seconds
+    ):
+        """
+        PyQt에서 설정한 유지시간을 저장한다.
+
+        Parameters
+        ----------
+        posture_seconds:
+            자세 유지시간
+
+        drowsy_seconds:
+            졸음 유지시간
+        """
+
+        try:
+
+            # 자세 유지시간 설정
+            self.serial_module.set_posture_hold_seconds(
+                posture_seconds
+            )
+
+
+            # 졸음 유지시간 설정
+            self.serial_module.set_drowsy_hold_seconds(
+                drowsy_seconds
+            )
+
+
+            print(
+
+                f"[Hardware] 유지시간 설정 완료 "
+
+                f"(posture={posture_seconds}s, "
+
+                f"drowsy={drowsy_seconds}s)"
+
+            )
+
+            return True
+
+
+        except Exception as e:
+
+            print(
+
+                f"[Hardware] 유지시간 설정 실패: {e}"
+
+            )
+
+            return False
+
+
     def start_HardwareSet(self):
         """
         캘리브레이션 전에 1회 실행할 카메라 수평 보정.

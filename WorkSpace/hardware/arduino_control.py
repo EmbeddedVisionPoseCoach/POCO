@@ -46,6 +46,30 @@ drowsy_start_time = None
 last_sent_drowsy = False
 
 
+# ==================================================
+# 사용자 설정 유지시간
+#
+# 사용자가 설정 가능:
+# - 자세 유지시간
+# - 졸음 유지시간
+#
+# 사용자가 설정 불가:
+# - LED/부저 ON-OFF 시간
+# ==================================================
+
+# 자세 유지시간(초)
+# Asymmetric
+# ForwardHead
+# ChinPropping
+posture_hold_seconds = 3
+
+
+# 졸음 유지시간(초)
+# Drowsy
+drowsy_hold_seconds = 5
+
+
+
 # =========================
 # 아두이노로 명령 보내는 함수
 # =========================
@@ -113,7 +137,54 @@ def set_drowsy_alert_count(
         arduino,
         command
     )
-    
+
+
+# ==================================================
+# 자세 유지시간 설정
+# --------------------------------------------------
+# PyQt에서 사용자가 설정한 자세 유지시간을 저장한다.
+#
+# 예:
+# 자세 유지시간 3초
+# 자세 유지시간 5초
+#
+# 적용 대상:
+# - Asymmetric
+# - ForwardHead
+# - ChinPropping
+# ==================================================
+def set_posture_hold_seconds(seconds):
+    global posture_hold_seconds
+
+    # 너무 작거나 큰 값이 들어오는 것을 방지
+    posture_hold_seconds = max(1, min(int(seconds), 60))
+
+    print(
+        f"[Hardware Setting] 자세 유지시간: {posture_hold_seconds}초"
+    )
+
+
+# ==================================================
+# 졸음 유지시간 설정
+# --------------------------------------------------
+# PyQt에서 사용자가 설정한 졸음 유지시간을 저장한다.
+#
+# 예:
+# 졸음 유지시간 5초
+# 졸음 유지시간 10초
+#
+# 적용 대상:
+# - Drowsy
+# ==================================================
+def set_drowsy_hold_seconds(seconds):
+    global drowsy_hold_seconds
+
+    # 너무 작거나 큰 값이 들어오는 것을 방지
+    drowsy_hold_seconds = max(1, min(int(seconds), 60))
+
+    print(
+        f"[Hardware Setting] 졸음 유지시간: {drowsy_hold_seconds}초"
+    )
 
 
 # =========================
@@ -232,8 +303,13 @@ def get_posture_result_from_ai(class_idx):
         # 같은 나쁜 자세가 계속 유지되는 중
         elapsed_time = now - bad_start_time
 
-        # 3초 이상 지속되고, 아직 같은 값을 보내지 않았다면 전송
-        if elapsed_time >= 3 and last_sent_idx != class_idx:
+        # 설정된 유지시간 이상 지속되고,
+        # 아직 같은 값을 보내지 않았다면 전송
+        if (
+            elapsed_time >= posture_hold_seconds
+            and
+            last_sent_idx != class_idx
+        ):
             last_sent_idx = class_idx
             return convert_class_idx_to_command(class_idx)
 
@@ -304,7 +380,14 @@ def get_alert_result_from_ai(pose_index, fatigue_index):
 
         elapsed_time = now - drowsy_start_time
 
-        if elapsed_time >= 5 and not last_sent_drowsy:
+
+        # 설정된 유지시간 이상 유지되고,
+        # 아직 Drowsy를 보내지 않았다면
+        if (
+            elapsed_time >= drowsy_hold_seconds
+            and
+            not last_sent_drowsy
+        ):
             last_sent_drowsy = True
             return "Drowsy"
 
