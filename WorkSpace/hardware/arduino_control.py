@@ -106,28 +106,23 @@ def convert_class_idx_to_command(class_idx):
     """
     AI class_idx를 아두이노로 보낼 문자열로 변환
     AI class_idx:
-        0: Optimal
-        1: ForwardHead
-        2: ChinPropping
-        3: Asymmetric
+        0: "Optimal",
+        1: "Asymmetric",
+        2: "ForwardHead",
+        3: "ChinPropping"
 
         Face는 문자열로 넘어옴
         Normal
         Drowsy
         
 
-    기존 임시 입력:
-        1: Good
-        2: Asymmetry
-        3: ForwardHead
-        4: ChinRest
     """
 
     commands = {
-        0: "Good",
-        1: "Asymmetry",
+        0: "Optimal",
+        1: "Asymmetric",
         2: "ForwardHead",
-        3: "ChinRest"
+        3: "ChinPropping"
     }
 
     return commands.get(class_idx)
