@@ -69,6 +69,36 @@ posture_hold_seconds = 3
 drowsy_hold_seconds = 5
 
 
+# ==================================================
+# 강한 알람 / 쿨타임 설정값
+# ==================================================
+
+# 자세 일반 알람이 몇 회 반복되면 강한 알람으로 바꿀지
+posture_strong_alert_limit = 3
+
+# 졸음 일반 알람이 몇 회 반복되면 강한 알람으로 바꿀지
+drowsy_strong_alert_limit = 2
+
+# 강한 알람 후 같은 알람을 몇 분 동안 중단할지
+alert_cooldown_minutes = 5
+
+
+# ==================================================
+# 알람 반복 횟수 / 쿨타임 상태 변수
+# ==================================================
+
+# 현재 같은 알람이 몇 번 울렸는지 저장
+current_alert_repeat_count = 0
+
+# 현재 반복 카운트 중인 알람 종류
+# 예: "ForwardHead", "Drowsy"
+current_alert_command = None
+
+# 쿨타임이 끝나는 시간
+# 알람 종류별로 따로 저장
+# 예: {"ForwardHead": 1710000000.0}
+cooldown_until = {}
+
 
 # =========================
 # 아두이노로 명령 보내는 함수
@@ -267,6 +297,44 @@ def convert_class_idx_to_command(class_idx):
     return commands.get(class_idx)
 
 
+# ==================================================
+# 일반 알람 / 강한 알람 / 쿨타임 판단 함수
+# ==================================================
+def process_alert_with_cooldown(command, strong_limit):
+    """
+    같은 알람이 반복될 때 일반 알람을 보낼지,
+    강한 알람을 보낼지, 쿨타임 때문에 무시할지 결정한다.
+    """
+
+    global current_alert_repeat_count
+    global current_alert_command
+    global cooldown_until
+
+    now = time.time()
+
+    # 현재 command가 쿨타임 중이면 알림을 보내지 않음
+    if command in cooldown_until and now < cooldown_until[command]:
+        return None
+
+    # 이전 알람과 다른 종류면 반복 카운트 초기화
+    if current_alert_command != command:
+        current_alert_command = command
+        current_alert_repeat_count = 0
+
+    # 같은 알람 반복 횟수 증가
+    current_alert_repeat_count += 1
+
+    # 설정 횟수에 도달하면 강한 알람 전송
+    if current_alert_repeat_count >= strong_limit:
+        cooldown_until[command] = now + (alert_cooldown_minutes * 60)
+        current_alert_repeat_count = 0
+        current_alert_command = None
+        return "StrongAlert"
+
+    # 아직 강한 알람 조건 전이면 일반 알람 전송
+    return command
+
+
 def get_posture_result_from_ai(class_idx):
     global last_sent_idx
     global bad_start_time
@@ -311,7 +379,13 @@ def get_posture_result_from_ai(class_idx):
             last_sent_idx != class_idx
         ):
             last_sent_idx = class_idx
-            return convert_class_idx_to_command(class_idx)
+            
+            command = convert_class_idx_to_command(class_idx)
+
+            return process_alert_with_cooldown(
+                command,
+                posture_strong_alert_limit
+            )
 
         return None
     
@@ -389,7 +463,11 @@ def get_alert_result_from_ai(pose_index, fatigue_index):
             not last_sent_drowsy
         ):
             last_sent_drowsy = True
-            return "Drowsy"
+            
+            return process_alert_with_cooldown(
+                "Drowsy",
+                drowsy_strong_alert_limit
+            )
 
         return None
 
