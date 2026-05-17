@@ -34,6 +34,17 @@ bad_start_time = None
 # 현재 감지 중인 나쁜 자세 번호
 current_bad_idx = None
 
+# =========================
+# Drowsy(졸림) 상태 관리용 변수
+# =========================
+
+# 졸림 상태가 처음 감지된 시간
+drowsy_start_time = None
+
+# 이미 Drowsy 알림을 보냈는지 여부
+# True이면 같은 Drowsy 상태에서는 중복 알림 방지
+last_sent_drowsy = False
+
 
 # =========================
 # 아두이노로 명령 보내는 함수
@@ -171,7 +182,10 @@ def get_posture_result_from_ai(class_idx):
 
         return None
     
-    
+
+# ==================================================
+# Pose + Face 결과를 합쳐 최종 알림 우선순위를 결정
+# ==================================================
 def get_alert_result_from_ai(pose_index, fatigue_index):
     """
     AI 추론 결과(pose + fatigue)를 받아
@@ -195,50 +209,68 @@ def get_alert_result_from_ai(pose_index, fatigue_index):
         1: Drowsy
 
 
-    우선순위
-    ----------
-    Drowsy
-        ↓
-    ChinPropping
-        ↓
-    ForwardHead
-        ↓
-    Asymmetric
-        ↓
-    Optimal
+    우선순위:
+        Drowsy > ChinPropping > ForwardHead > Asymmetric > Optimal
 
-
-    예시
-    ----------
-    pose_index = 2
-    fatigue_index = 1
-
-    → ForwardHead + Drowsy 동시 감지
-
-    → Drowsy 우선
-    → "Drowsy" 반환
+    동작 기준:
+        - Drowsy는 5초 이상 지속될 때 알림
+        - 자세 불량은 기존처럼 3초 유지 후 알림
+        - Optimal은 바로 전송
     """
 
-    # ==========================
-    # 1순위: 졸림 상태(Drowsy)
-    # ==========================
-    #
-    # 졸림은 사고/집중력 저하 위험이 크므로
-    # 자세보다 우선해서 알림을 준다.
-    #
+    global drowsy_start_time
+    global last_sent_drowsy
+    global bad_start_time
+    global current_bad_idx
+
+    now = time.time()
+
+    # =========================
+    # 1순위: Drowsy
+    # =========================
     if fatigue_index == 1:
-        return "Drowsy"
+
+        # Drowsy가 감지되는 동안에는
+        # 자세 판단보다 Drowsy 판단을 우선한다.
+        #
+        # 따라서 이전에 진행 중이던 자세 불량 유지시간은 초기화한다.
+        # 예:
+        # ForwardHead 2초 감지 중 Drowsy가 들어오면
+        # ForwardHead 타이머는 다시 0초부터 보도록 한다.
+        bad_start_time = None
+        current_bad_idx = None
+
+        # 처음 Drowsy가 감지된 순간 시간 기록
+        if drowsy_start_time is None:
+            drowsy_start_time = now
+            return None
+
+        elapsed_time = now - drowsy_start_time
+
+        if elapsed_time >= 5 and not last_sent_drowsy:
+            last_sent_drowsy = True
+            return "Drowsy"
+
+        return None
 
 
-    # ==========================
-    # 2순위 이하: 자세 알림
-    # ==========================
-    #
-    # Drowsy가 아니라면 기존 자세 판단 로직 사용
-    #
+    # =========================
+    # Drowsy가 아닌 경우
+    # =========================
+    # Drowsy 유지시간 초기화
+    drowsy_start_time = None
+    last_sent_drowsy = False
+
+
+    # Drowsy가 아니면 기존 자세 알림 로직으로 처리
+    # =========================
+    # 기존 자세 판단 사용
+    # =========================
     return get_posture_result_from_ai(
         pose_index
     )
+
+
 
 # =========================
 # 메인 실행부
