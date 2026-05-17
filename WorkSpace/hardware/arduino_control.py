@@ -98,8 +98,8 @@ def start_leveling(arduino):
 
 
 # =========================
-# 임시 자세 판단 함수
-# 나중에 실제 자세 판단 결과와 연결할 부분
+# 자세 판단 함수
+# 실제 자세 판단 결과와 연결할 부분
 # =========================
 
 def convert_class_idx_to_command(class_idx):
@@ -136,7 +136,7 @@ def get_posture_result_from_ai(class_idx):
     now = time.time()
 
     # =========================
-    # 0번: Good 상태
+    # 0번: Optimal 상태
     # 정상 자세는 바로 전송
     # =========================
     if class_idx == 0:
@@ -146,7 +146,7 @@ def get_posture_result_from_ai(class_idx):
         # 이전에 보낸 값과 다를 때만 전송
         if last_sent_idx != class_idx:
             last_sent_idx = class_idx
-            return "Good"
+            return "Optimal"
 
         return None
 

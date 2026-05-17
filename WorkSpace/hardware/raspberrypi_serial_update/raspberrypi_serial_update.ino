@@ -103,36 +103,62 @@ void loop() {
       autoLevelCameraOnce();
     }
 
-    // 정상 자세
-    else if (command == "Good") {
+    // 정상 자세 초록 (Green)
+    else if (command == "Optimal") {
       blinkFeedback(
         0, 255, 0,
-        3, 500, 500,
+        
+        3,    // LED 깜빡임 횟수
+        500,  // ON 시간(ms)
+        500,  // OFF 시간(ms)
         0, 0, 0
       );
     }
 
-    else if (command == "Asymmetry") {
+    // 비대칭 하늘색 / 시안(Cyan 계열)
+    else if (command == "Asymmetric") {
       blinkFeedback(
         0, 180, 255,
-        3, 500, 500,
-        3, 200, 200
+
+        3,      // LED 깜빡임 횟수
+        500,    // ON 시간(ms)
+        500,    // OFF 시간(ms)
+
+        3,      // 부저 횟수
+        200,    // 부저 ON(ms)
+        200     // 부저 OFF(ms)
+
       );
     }
 
+    // 거북목 주황 (Orange)
     else if (command == "ForwardHead") {
       blinkFeedback(
         255, 120, 0,
-        3, 500, 500,
-        3, 200, 200
+
+        3,      // LED 깜빡임 횟수
+        500,    // ON 시간(ms)
+        500,    // OFF 시간(ms)
+
+        3,      // 부저 횟수
+        200,    // 부저 ON(ms)
+        200     // 부저 OFF(ms)
       );
     }
 
-    else if (command == "ChinRest") {
+    // 턱굄 빨강 (Red)
+    else if (command == "ChinPropping") {
       blinkFeedback(
         255, 0, 0,
-        3, 500, 500,
-        3, 200, 200
+
+        3,      // LED 깜빡임 횟수
+        500,    // ON 시간(ms)
+        500,    // OFF 시간(ms)
+
+        3,      // 부저 횟수
+        200,    // 부저 ON(ms)
+        200     // 부저 OFF(ms)
+
       );
     }
   }
