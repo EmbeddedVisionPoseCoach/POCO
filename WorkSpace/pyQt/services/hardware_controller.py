@@ -169,6 +169,13 @@ class HardwareController:
             졸음 유지시간
         """
 
+        # 설정 적용 전 연결 확인
+        if not self.ensure_connected():
+            print(
+                "[Hardware] 연결되지 않아 유지시간 설정을 적용하지 못했습니다."
+            )
+            return False
+
         try:
 
             # 자세 유지시간 설정
@@ -225,6 +232,13 @@ class HardwareController:
         cooldown_minutes:
             StrongAlert 이후 같은 알람을 몇 분 동안 중단할지
         """
+
+        # 설정 적용 전 연결 확인
+        if not self.ensure_connected():
+            print(
+                "[Hardware] 연결되지 않아 StrongAlert 설정을 적용하지 못했습니다."
+            )
+            return False
 
         try:
             self.serial_module.set_strong_alert_settings(

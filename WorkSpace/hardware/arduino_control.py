@@ -41,8 +41,8 @@ current_bad_idx = None
 # 졸림 상태가 처음 감지된 시간
 drowsy_start_time = None
 
-# 이미 Drowsy 알림을 보냈는지 여부
-# True이면 같은 Drowsy 상태에서는 중복 알림 방지
+# Drowsy 알림 상태 기록용 변수
+# 현재 구조에서는 Drowsy가 해제되었는지 판단할 때 사용
 last_sent_drowsy = False
 
 
@@ -494,13 +494,14 @@ def get_posture_result_from_ai(class_idx):
 
         # 설정된 유지시간 이상 지속되고,
         # 아직 같은 값을 보내지 않았다면 전송
-        if (
-            elapsed_time >= posture_hold_seconds
-            and
-            last_sent_idx != class_idx
-        ):
+        if elapsed_time >= posture_hold_seconds:
             last_sent_idx = class_idx
-            
+
+            # 알람을 한 번 보낸 뒤에도 같은 자세가 계속 유지되면
+            # 다시 posture_hold_seconds 만큼 시간을 재서 다음 알람을 보낸다.
+            # 그래야 같은 자세 알람이 연속으로 카운트되어 StrongAlert까지 갈 수 있다.
+            bad_start_time = now
+
             command = convert_class_idx_to_command(class_idx)
 
             return process_alert_with_cooldown(
@@ -578,13 +579,14 @@ def get_alert_result_from_ai(pose_index, fatigue_index):
 
         # 설정된 유지시간 이상 유지되고,
         # 아직 Drowsy를 보내지 않았다면
-        if (
-            elapsed_time >= drowsy_hold_seconds
-            and
-            not last_sent_drowsy
-        ):
+        if elapsed_time >= drowsy_hold_seconds:
             last_sent_drowsy = True
-            
+
+            # 알람을 한 번 보낸 뒤에도 Drowsy가 계속 유지되면
+            # 다시 drowsy_hold_seconds 만큼 시간을 재서 다음 알람을 보낸다.
+            # 그래야 Drowsy 알람도 연속 카운트되어 StrongAlert까지 갈 수 있다.
+            drowsy_start_time = now
+
             return process_alert_with_cooldown(
                 "Drowsy",
                 drowsy_strong_alert_limit

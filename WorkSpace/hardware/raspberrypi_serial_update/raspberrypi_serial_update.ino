@@ -245,8 +245,8 @@ void loop() {
     // 보라색 (255,0,255)
     //
     // 동작:
-    // LED 3회 점멸
-    // 부저 3회 출력
+    // LED drowsyAlertCount회 점멸
+    // 부저 drowsyAlertCount회 출력
     //
     // 우선순위:
     // Drowsy
