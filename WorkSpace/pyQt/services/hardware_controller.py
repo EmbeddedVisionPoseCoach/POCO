@@ -137,20 +137,44 @@ class HardwareController:
             return
 
         try:
-            # 현재 하드웨어 팀 함수는 pose class index 기반으로 command를 생성한다.
-            command = self.serial_module.get_posture_result_from_ai(pose_index)
-
-            if command is not None:
-                self.serial_module.send_command(self.arduino, command)
-
-            # 아두이노 응답이 있으면 읽어둔다.
-            self.serial_module.read_response(self.arduino)
-
-            # fatigue_index는 현재 하드웨어 팀 함수에 아직 반영되어 있지 않다.
-            # 나중에 졸림 상태에 따라 별도 명령이 필요하면 여기서 추가하면 된다.
+            # 현재 AI 추론 결과(pose + fatigue)를 기반으로
+            # 아두이노에 보낼 최종 command를 생성한다.
+            #
+            # 우선순위:
+            # Drowsy > ChinPropping > ForwardHead > Asymmetric > Optimal
+            #
             # 예:
-            # if fatigue_index == 1:
-            #     self.serial_module.send_command(self.arduino, "Drowsy")
+            # fatigue_index = 1 (Drowsy)
+            # pose_index = 2 (ForwardHead)
+            #
+            # → 졸림 상태가 더 중요하므로 "Drowsy" 전송
+            #
+            # 예:
+            # fatigue_index = 0 (Normal)
+            # pose_index = 2 (ForwardHead)
+            #
+            # → "ForwardHead" 전송
+
+            command = self.serial_module.get_alert_result_from_ai(
+                pose_index,
+                fatigue_index
+            )
+
+            # 생성된 command가 있으면 아두이노로 전송
+            # None이면 현재 전송할 상태가 없다는 의미
+            if command is not None:
+                self.serial_module.send_command(
+                    self.arduino,
+                    command
+                )
+
+            # 아두이노가 보낸 응답 메시지가 있으면 읽어둔다.
+            # 예:
+            # "LEVELING_DONE"
+            # "ALERT_DONE"
+            self.serial_module.read_response(
+                self.arduino
+            )
 
         except Exception as e:
             print(f"[Hardware] result 처리 실패: {e}")

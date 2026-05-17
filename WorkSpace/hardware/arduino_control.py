@@ -170,6 +170,75 @@ def get_posture_result_from_ai(class_idx):
             return convert_class_idx_to_command(class_idx)
 
         return None
+    
+    
+def get_alert_result_from_ai(pose_index, fatigue_index):
+    """
+    AI 추론 결과(pose + fatigue)를 받아
+    우선순위 기준으로 최종 알림 command를 생성한다.
+
+    Parameters
+    ----------
+    pose_index:
+        자세 모델 결과
+
+        0: Optimal
+        1: Asymmetric
+        2: ForwardHead
+        3: ChinPropping
+
+
+    fatigue_index:
+        피로도 모델 결과
+
+        0: Normal
+        1: Drowsy
+
+
+    우선순위
+    ----------
+    Drowsy
+        ↓
+    ChinPropping
+        ↓
+    ForwardHead
+        ↓
+    Asymmetric
+        ↓
+    Optimal
+
+
+    예시
+    ----------
+    pose_index = 2
+    fatigue_index = 1
+
+    → ForwardHead + Drowsy 동시 감지
+
+    → Drowsy 우선
+    → "Drowsy" 반환
+    """
+
+    # ==========================
+    # 1순위: 졸림 상태(Drowsy)
+    # ==========================
+    #
+    # 졸림은 사고/집중력 저하 위험이 크므로
+    # 자세보다 우선해서 알림을 준다.
+    #
+    if fatigue_index == 1:
+        return "Drowsy"
+
+
+    # ==========================
+    # 2순위 이하: 자세 알림
+    # ==========================
+    #
+    # Drowsy가 아니라면 기존 자세 판단 로직 사용
+    #
+    return get_posture_result_from_ai(
+        pose_index
+    )
 
 # =========================
 # 메인 실행부
