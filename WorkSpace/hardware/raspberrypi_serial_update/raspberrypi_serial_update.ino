@@ -347,6 +347,10 @@ void autoLevelCameraOnce() {
 
     // 목표 각도와 현재 각도 차이가 허용 범위 안이면 보정 완료
     if (abs(error) <= TOLERANCE) {
+
+      // 수평 보정 성공 시 완료 효과 출력
+      rainbowSuccessEffect();
+
       Serial.println("LEVELING_DONE");
       return;
     }
@@ -391,6 +395,57 @@ float getRollAngle() {
 
   return roll;
 }
+
+
+
+// =====================================================
+// 수평 보정 완료 효과
+// -----------------------------------------------------
+// 카메라 수평 보정이 성공하면
+// 네오픽셀이 무지개색으로 차례대로 켜졌다가
+// 잠시 후 꺼지는 효과를 보여준다.
+// =====================================================
+void rainbowSuccessEffect() {
+  uint32_t colors[8] = {
+    strip.Color(255, 0, 0),      // 빨강
+    strip.Color(255, 80, 0),     // 주황
+    strip.Color(255, 255, 0),    // 노랑
+    strip.Color(0, 255, 0),      // 초록
+    strip.Color(0, 255, 255),    // 하늘
+    strip.Color(0, 0, 255),      // 파랑
+    strip.Color(120, 0, 255),    // 남보라
+    strip.Color(255, 0, 255)     // 보라
+  };
+
+  // LED를 하나씩 차례대로 켜기
+  for (int i = 0; i < LED_COUNT; i++) {
+    strip.setPixelColor(
+      i,
+      colors[i % 8]
+    );
+
+    strip.show();
+    delay(120);
+  }
+
+  // 무지개가 잠깐 보이도록 유지
+  delay(500);
+
+  // LED를 하나씩 차례대로 끄기
+  for (int i = 0; i < LED_COUNT; i++) {
+    strip.setPixelColor(
+      i,
+      strip.Color(0, 0, 0)
+    );
+
+    strip.show();
+    delay(80);
+  }
+
+  // 혹시 남아있는 LED가 없도록 전체 OFF
+  turnOffNeoPixel();
+}
+
 
 
 // =====================================================
