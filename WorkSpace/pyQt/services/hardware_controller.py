@@ -205,6 +205,49 @@ class HardwareController:
             )
 
             return False
+        
+
+    def set_strong_alert_settings(
+        self,
+        posture_limit,
+        drowsy_limit,
+        cooldown_minutes
+    ):
+        """
+        PyQt에서 설정한 StrongAlert 기준값을 arduino_control.py에 전달한다.
+
+        posture_limit:
+            자세 일반 알람이 몇 회 연속 반복되면 StrongAlert로 바꿀지
+
+        drowsy_limit:
+            졸음 일반 알람이 몇 회 연속 반복되면 StrongAlert로 바꿀지
+
+        cooldown_minutes:
+            StrongAlert 이후 같은 알람을 몇 분 동안 중단할지
+        """
+
+        try:
+            self.serial_module.set_strong_alert_settings(
+                posture_limit,
+                drowsy_limit,
+                cooldown_minutes
+            )
+
+            print(
+                f"[Hardware] StrongAlert 설정 완료 "
+                f"(posture_limit={posture_limit}, "
+                f"drowsy_limit={drowsy_limit}, "
+                f"cooldown={cooldown_minutes}분)"
+            )
+
+            return True
+
+        except Exception as e:
+            print(f"[Hardware] StrongAlert 설정 실패: {e}")
+            return False
+
+
+
 
 
     def start_HardwareSet(self):

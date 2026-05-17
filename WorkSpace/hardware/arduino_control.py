@@ -87,15 +87,23 @@ alert_cooldown_minutes = 5
 # 알람 반복 횟수 / 쿨타임 상태 변수
 # ==================================================
 
-# 현재 같은 알람이 몇 번 울렸는지 저장
-current_alert_repeat_count = 0
+## 아래 주석 부분 수정 
+# # 현재 같은 알람이 몇 번 울렸는지 저장
+# current_alert_repeat_count = 0
 
-# 현재 반복 카운트 중인 알람 종류
-# 예: "ForwardHead", "Drowsy"
-current_alert_command = None
+# # 현재 반복 카운트 중인 알람 종류
+# # 예: "ForwardHead", "Drowsy"
+# current_alert_command = None
+## 여기까지
+
+# 마지막으로 연속 카운트 중인 알람 command
+last_alert_command = None
+
+# 알람 종류별 연속 반복 횟수 저장
+# 예: {"ForwardHead": 2, "Drowsy": 1}
+continuous_alert_counts = {}
 
 # 쿨타임이 끝나는 시간
-# 알람 종류별로 따로 저장
 # 예: {"ForwardHead": 1710000000.0}
 cooldown_until = {}
 
@@ -217,6 +225,46 @@ def set_drowsy_hold_seconds(seconds):
     )
 
 
+# ==================================================
+# StrongAlert / 쿨타임 설정
+# --------------------------------------------------
+# PyQt에서 사용자가 설정한 강한 알람 기준값을 저장한다.
+#
+# posture_limit:
+#   자세 일반 알람이 몇 회 연속 반복되면 StrongAlert로 바꿀지
+#
+# drowsy_limit:
+#   졸음 일반 알람이 몇 회 연속 반복되면 StrongAlert로 바꿀지
+#
+# cooldown_minutes:
+#   StrongAlert 이후 같은 알람을 몇 분 동안 중단할지
+#
+# 주의:
+#   이 값들은 아두이노로 보내는 값이 아니다.
+#   StrongAlert 판단은 라즈베리파이 Python에서 처리한다.
+# ==================================================
+def set_strong_alert_settings(
+    posture_limit,
+    drowsy_limit,
+    cooldown_minutes
+):
+    global posture_strong_alert_limit
+    global drowsy_strong_alert_limit
+    global alert_cooldown_minutes
+
+    # 너무 작거나 큰 값이 들어오는 것을 방지
+    posture_strong_alert_limit = max(1, min(int(posture_limit), 20))
+    drowsy_strong_alert_limit = max(1, min(int(drowsy_limit), 20))
+    alert_cooldown_minutes = max(1, min(int(cooldown_minutes), 60))
+
+    print(
+        "[Hardware Setting] StrongAlert 설정 완료 "
+        f"(posture_limit={posture_strong_alert_limit}, "
+        f"drowsy_limit={drowsy_strong_alert_limit}, "
+        f"cooldown={alert_cooldown_minutes}분)"
+    )
+
+
 # =========================
 # 아두이노 응답 읽는 함수
 # =========================
@@ -302,37 +350,110 @@ def convert_class_idx_to_command(class_idx):
 # ==================================================
 def process_alert_with_cooldown(command, strong_limit):
     """
-    같은 알람이 반복될 때 일반 알람을 보낼지,
-    강한 알람을 보낼지, 쿨타임 때문에 무시할지 결정한다.
+    같은 command가 '연속으로' 반복될 때만 StrongAlert를 발생시킨다.
+
+    예:
+        ForwardHead → ForwardHead → ForwardHead
+        → StrongAlert 가능
+
+        ForwardHead → ChinPropping → ForwardHead
+        → 연속이 아니므로 StrongAlert 아님
+
+    StrongAlert 이후에는 해당 command만 쿨타임에 들어간다.
     """
 
-    global current_alert_repeat_count
-    global current_alert_command
+    global last_alert_command
+    global continuous_alert_counts
     global cooldown_until
 
     now = time.time()
 
-    # 현재 command가 쿨타임 중이면 알림을 보내지 않음
+    # =========================
+    # 1. 쿨타임 확인
+    # =========================
+    # StrongAlert가 이미 울린 command라면
+    # cooldown_until 딕셔너리에 종료 시간이 저장되어 있다.
+    #
+    # 예:
+    # cooldown_until = {
+    #     "ForwardHead": 1710000000.0
+    # }
+    #
+    # 현재 시간이 종료 시간보다 작으면 아직 쿨타임 중이므로
+    # 같은 command 알림은 보내지 않는다.
     if command in cooldown_until and now < cooldown_until[command]:
         return None
 
-    # 이전 알람과 다른 종류면 반복 카운트 초기화
-    if current_alert_command != command:
-        current_alert_command = command
-        current_alert_repeat_count = 0
+    # =========================
+    # 2. 쿨타임 종료 처리
+    # =========================
+    # 현재 시간이 쿨타임 종료 시간보다 크거나 같으면
+    # 해당 command는 다시 알림을 보낼 수 있는 상태가 된다.
+    if command in cooldown_until and now >= cooldown_until[command]:
 
-    # 같은 알람 반복 횟수 증가
-    current_alert_repeat_count += 1
+        # 쿨타임 목록에서 제거
+        del cooldown_until[command]
 
-    # 설정 횟수에 도달하면 강한 알람 전송
-    if current_alert_repeat_count >= strong_limit:
+        # 해당 command의 연속 카운트 초기화
+        continuous_alert_counts[command] = 0
+
+        # 마지막 알람이 현재 command였다면
+        # 연속 판단도 다시 시작할 수 있도록 초기화
+        if last_alert_command == command:
+            last_alert_command = None
+
+    # =========================
+    # 3. 연속 알람 카운트 처리
+    # =========================
+    # 직전에 처리한 알람과 현재 알람이 같으면
+    # 같은 알람이 연속으로 들어온 것이므로 카운트를 증가시킨다.
+    if last_alert_command == command:
+        continuous_alert_counts[command] = (
+            continuous_alert_counts.get(command, 0) + 1
+        )
+
+    # 직전 알람과 현재 알람이 다르면
+    # 연속 흐름이 끊긴 것이다.
+    #
+    # 예:
+    # ForwardHead → ChinPropping
+    #
+    # 이 경우 ChinPropping은 1회차부터 새로 시작한다.
+    else:
+        continuous_alert_counts[command] = 1
+        last_alert_command = command
+
+    # 현재 command의 연속 알림 횟수
+    current_count = continuous_alert_counts[command]
+
+    # =========================
+    # 4. StrongAlert 판단
+    # =========================
+    # 같은 command가 strong_limit 횟수만큼 연속되면
+    # StrongAlert를 반환한다.
+    #
+    # 예:
+    # strong_limit = 3
+    #
+    # ForwardHead 1회 → 일반 알람
+    # ForwardHead 2회 → 일반 알람
+    # ForwardHead 3회 → StrongAlert
+    if current_count >= strong_limit:
+
+        # 해당 command만 쿨타임 시작
         cooldown_until[command] = now + (alert_cooldown_minutes * 60)
-        current_alert_repeat_count = 0
-        current_alert_command = None
+
+        # StrongAlert 이후 해당 command 연속 카운트 초기화
+        continuous_alert_counts[command] = 0
+
+        # 마지막 알람도 초기화해서 다음 알람은 새로 시작
+        last_alert_command = None
+
         return "StrongAlert"
 
-    # 아직 강한 알람 조건 전이면 일반 알람 전송
+    # 아직 strong_limit에 도달하지 않았다면 일반 알람 반환
     return command
+
 
 
 def get_posture_result_from_ai(class_idx):
