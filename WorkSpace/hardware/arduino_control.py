@@ -59,6 +59,63 @@ def send_command(arduino, command):
     print(f"[RasPi → Arduino] {command}")
 
 
+# ==================================================
+# 자세 알림 횟수 설정
+# --------------------------------------------------
+# 라즈베리 → 아두이노
+#
+# 예:
+# SET_POSTURE_COUNT:5
+#
+# 자세 알림:
+# Asymmetric
+# ForwardHead
+# ChinPropping
+#
+# 횟수 변경
+# ==================================================
+def set_posture_alert_count(
+    arduino,
+    count
+):
+
+    command = (
+        f"SET_POSTURE_COUNT:{count}"
+    )
+
+    send_command(
+        arduino,
+        command
+    )
+
+
+
+# ==================================================
+# 졸음 알림 횟수 설정
+# --------------------------------------------------
+# 라즈베리 → 아두이노
+#
+# 예:
+# SET_DROWSY_COUNT:3
+#
+# Drowsy 알림 횟수 변경
+# ==================================================
+def set_drowsy_alert_count(
+    arduino,
+    count
+):
+
+    command = (
+        f"SET_DROWSY_COUNT:{count}"
+    )
+
+    send_command(
+        arduino,
+        command
+    )
+    
+
+
 # =========================
 # 아두이노 응답 읽는 함수
 # =========================

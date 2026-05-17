@@ -42,6 +42,30 @@ const int MOVE_DELAY = 80;      // 서보모터 이동 후 대기 시간
 
 const int MAX_LEVELING_COUNT = 150; // 수평 보정 최대 반복 횟수
 
+
+
+// =====================================================
+// 사용자 설정 알림 횟수
+// PyQt → Python → Arduino 로 전달받아 변경될 값
+//
+// 사용자가 설정 가능:
+// - 자세 알림 횟수
+// - 졸음 알림 횟수
+//
+// 사용자가 설정 불가:
+// - ON/OFF 시간(ms)
+// =====================================================
+
+// 자세 알림 횟수
+// Asymmetry, ForwardHead, ChinPropping
+int postureAlertCount = 3;
+
+
+// 졸음 알림 횟수
+// Drowsy
+int drowsyAlertCount = 3;
+
+
 // =====================================================
 // setup
 // 아두이노가 처음 켜질 때 한 번 실행되는 부분
@@ -97,6 +121,55 @@ void loop() {
     Serial.print("Received:");
     Serial.println(command);
 
+    // =====================================================
+    // 자세 알림 횟수 설정
+    // -----------------------------------------------------
+    // 라즈베리파이에서 "SET_POSTURE_COUNT:5" 형태로 보내면
+    // postureAlertCount 값을 5로 변경한다.
+    //
+    // 예:
+    // SET_POSTURE_COUNT:3
+    // SET_POSTURE_COUNT:5
+    // =====================================================
+    if (command.startsWith("SET_POSTURE_COUNT:")) {
+      int count = command.substring(18).toInt();
+
+      // 너무 작거나 큰 값이 들어오는 것을 방지
+      count = constrain(count, 1, 10);
+
+      postureAlertCount = count;
+
+      Serial.print("POSTURE_COUNT_SET:");
+      Serial.println(postureAlertCount);
+
+      return;
+    }
+
+    // =====================================================
+    // 졸음 알림 횟수 설정
+    // -----------------------------------------------------
+    // 라즈베리파이에서 "SET_DROWSY_COUNT:5" 형태로 보내면
+    // drowsyAlertCount 값을 5로 변경한다.
+    //
+    // 예:
+    // SET_DROWSY_COUNT:3
+    // SET_DROWSY_COUNT:5
+    // =====================================================
+    if (command.startsWith("SET_DROWSY_COUNT:")) {
+      int count = command.substring(17).toInt();
+
+      // 너무 작거나 큰 값이 들어오는 것을 방지
+      count = constrain(count, 1, 10);
+
+      drowsyAlertCount = count;
+
+      Serial.print("DROWSY_COUNT_SET:");
+      Serial.println(drowsyAlertCount);
+
+      return;
+    }
+    
+
     // 카메라 수평 보정 시작
     if (command == "START_LEVELING") {
       Serial.println("LEVELING_START");
@@ -108,9 +181,9 @@ void loop() {
       blinkFeedback(
         0, 255, 0,
 
-        3,    // LED 깜빡임 횟수
-        500,  // ON 시간(ms)
-        500,  // OFF 시간(ms)
+        1,    // LED 깜빡임 횟수
+        3000,  // ON 시간(ms)
+        0,  // OFF 시간(ms)
         0, 0, 0
       );
     }
@@ -120,11 +193,11 @@ void loop() {
       blinkFeedback(
         0, 180, 255,
 
-        3,      // LED 깜빡임 횟수
+        postureAlertCount,  // LED 깜빡임 횟수
         500,    // ON 시간(ms)
         500,    // OFF 시간(ms)
 
-        3,      // 부저 횟수
+        postureAlertCount,  // 부저 횟수
         200,    // 부저 ON(ms)
         200     // 부저 OFF(ms)
 
@@ -136,11 +209,11 @@ void loop() {
       blinkFeedback(
         255, 120, 0,
 
-        3,      // LED 깜빡임 횟수
+        postureAlertCount,  // LED 깜빡임 횟수
         500,    // ON 시간(ms)
         500,    // OFF 시간(ms)
 
-        3,      // 부저 횟수
+        postureAlertCount,  // 부저 횟수
         200,    // 부저 ON(ms)
         200     // 부저 OFF(ms)
       );
@@ -151,11 +224,11 @@ void loop() {
       blinkFeedback(
         255, 0, 0,
 
-        3,      // LED 깜빡임 횟수
+        postureAlertCount,  // LED 깜빡임 횟수
         500,    // ON 시간(ms)
         500,    // OFF 시간(ms)
 
-        3,      // 부저 횟수
+        postureAlertCount,  // 부저 횟수
         200,    // 부저 ON(ms)
         200     // 부저 OFF(ms)
 
@@ -196,12 +269,12 @@ void loop() {
             255, 0, 255,
 
             // LED 점멸
-            3,      // 횟수
+            drowsyAlertCount,  // LED 점멸 횟수
             500,    // ON(ms)
             500,    // OFF(ms)
 
             // 부저 출력
-            3,      // 횟수
+            drowsyAlertCount,  // 부저 출력 횟수
             200,    // ON(ms)
             200     // OFF(ms)
 

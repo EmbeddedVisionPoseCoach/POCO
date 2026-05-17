@@ -100,6 +100,57 @@ class HardwareController:
         else:
             print("[Hardware] 알림 기능 OFF")
 
+    def set_alert_counts(self, posture_count, drowsy_count):
+        """
+        PyQt에서 설정한 자세/졸음 알림 횟수를 아두이노로 전달한다.
+
+        Parameters
+        ----------
+        posture_count:
+            자세 불량 알림 횟수
+            Asymmetric, ForwardHead, ChinPropping에 적용된다.
+
+        drowsy_count:
+            졸음 알림 횟수
+            Drowsy에 적용된다.
+        """
+
+        if not self.enabled:
+            print("[Hardware] 비활성화 상태라 알림 횟수 설정을 건너뜁니다.")
+            return False
+
+        if not self.ensure_connected():
+            print("[Hardware] 연결되지 않아 알림 횟수 설정을 건너뜁니다.")
+            return False
+
+        try:
+            # 자세 알림 횟수 설정 명령 전송
+            self.serial_module.set_posture_alert_count(
+                self.arduino,
+                posture_count
+            )
+
+            # 졸음 알림 횟수 설정 명령 전송
+            self.serial_module.set_drowsy_alert_count(
+                self.arduino,
+                drowsy_count
+            )
+
+            # 아두이노가 설정 완료 메시지를 보내면 읽어둔다.
+            self.serial_module.read_response(self.arduino)
+            self.serial_module.read_response(self.arduino)
+
+            print(
+                f"[Hardware] 알림 횟수 설정 완료 "
+                f"(posture={posture_count}, drowsy={drowsy_count})"
+            )
+
+            return True
+
+        except Exception as e:
+            print(f"[Hardware] 알림 횟수 설정 실패: {e}")
+            return False
+
 
     def start_HardwareSet(self):
         """
