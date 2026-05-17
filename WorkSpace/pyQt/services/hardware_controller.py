@@ -34,6 +34,11 @@ class HardwareController:
         self.arduino = None
         self.is_connected = False
 
+        # 알림 기능 사용 여부
+        # True  : 자세/졸림 알림을 아두이노로 전송
+        # False : 추론은 계속 하지만 아두이노 알림은 보내지 않음
+        self.alert_enabled = True
+
         # 하드웨어 팀 모듈 함수들
         self.serial_module = None
 
@@ -78,6 +83,24 @@ class HardwareController:
             print(f"[Hardware] 연결 실패: {e}")
             return False
 
+
+    def set_alert_enabled(self, enabled):
+        """
+        PyQt UI에서 알림 ON/OFF 값이 바뀌었을 때 호출된다.
+
+        enabled:
+            True  -> 알림 켜기
+            False -> 알림 끄기
+        """
+
+        self.alert_enabled = enabled
+
+        if enabled:
+            print("[Hardware] 알림 기능 ON")
+        else:
+            print("[Hardware] 알림 기능 OFF")
+
+
     def start_HardwareSet(self):
         """
         캘리브레이션 전에 1회 실행할 카메라 수평 보정.
@@ -119,6 +142,11 @@ class HardwareController:
         """
 
         if not self.enabled:
+            return
+        
+        # 알림 OFF 상태이면 아두이노로 자세/졸림 알림을 보내지 않는다.
+        # 단, 추론 자체는 계속 진행되고 UI 표시도 정상 동작한다.
+        if not self.alert_enabled:
             return
 
         if result is None:
