@@ -306,14 +306,14 @@ void loop() {
 
 
             // LED
-            6,      // 횟수 (강하게)
-            200,    // ON(ms)
+            10,      // 횟수 (강하게)
+            100,    // ON(ms)
             100,    // OFF(ms)
 
 
             // 부저
-            6,      // 횟수
-            200,    // ON(ms)
+            10,      // 횟수
+            100,    // ON(ms)
             100     // OFF(ms)
 
         );
@@ -334,6 +334,12 @@ void loop() {
 // 목표 각도에 가까워질 때까지 서보모터를 조금씩 움직임
 // =====================================================
 void autoLevelCameraOnce() {
+
+  // 이전 보정 완료 후 detach된 서보를 다시 사용하기 위해 attach
+  if (!cameraServo.attached()) {
+      cameraServo.attach(SERVO_PIN);
+  }
+
   int count = 0;
 
   while (true) {
@@ -352,6 +358,12 @@ void autoLevelCameraOnce() {
       rainbowSuccessEffect();
 
       Serial.println("LEVELING_DONE");
+
+      // 수평 보정이 끝났으므로 서보 제어 신호를 끊음
+      // 완료 후에도 서보가 계속 미세하게 떨리거나 소리 나는 것을 줄이기 위함
+      cameraServo.detach();
+
+
       return;
     }
 
