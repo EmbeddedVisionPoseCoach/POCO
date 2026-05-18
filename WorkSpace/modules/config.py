@@ -24,6 +24,14 @@ SCALER_PATH = 'saved_model/posture_scaler.pkl' # StandardScaler 객체 저장 �
 MODEL_FACE_PATH = 'saved_model/face_model.tflite'
 SCALER_FACE_PATH = 'saved_model/face_scaler.pkl'
 
+MODEL_PATH_GRU = 'saved_model/posture_model_GRU.tflite'
+SCALER_PATH_GRU = 'saved_model/posture_scaler_GRU.pkl' # StandardScaler 객체 저장 경로
+
+MODEL_FACE_PATH_GRU = 'saved_model/face_model_GRU.tflite'
+SCALER_FACE_PATH_GRU = 'saved_model/face_scaler_GRU.pkl'
+
+
+
 BASELINE_PATH = 'saved_model/baseline.pkl'
 
 # 라벨링 및 색상 정보
@@ -83,7 +91,7 @@ MODEL_VERSION = MODEL_VERSION_MLP
 # ------------------------------------------------------------
 
 # Windows 개발 환경에서는 False 추천
-HARDWARE_ENABLED = False
+HARDWARE_ENABLED = True
 
 # 아두이노가 연결된 포트 이름
 # 라즈베리파이에서는 보통 Arduino Uno가 /dev/ttyACM0 또는 /dev/ttyUSB0로 잡힘
