@@ -31,7 +31,7 @@ Adafruit_NeoPixel strip(LED_COUNT, NEOPIXEL_PIN, NEO_GRB + NEO_KHZ800);
 // =====================================================
 int servoAngle = 170;            // 서보모터 시작 각도
 
-const int SERVO_MIN = 146;       // 서보모터 최소 각도 제한
+const int SERVO_MIN = 144;       // 서보모터 최소 각도 제한
 const int SERVO_MAX = 180;      // 서보모터 최대 각도 제한
 
 const float TARGET_ANGLE = 0.0; // 목표 수평 각도
