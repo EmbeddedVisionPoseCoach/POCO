@@ -1,0 +1,9 @@
+{
+    "threshold": 0.6499999999999997,
+    "selection_metric": "validation_f1",
+    "description": "If drowsy_probability >= threshold, label is Drowsy.",
+    "validation_precision": 0.9366303339517625,
+    "validation_recall": 0.8545358370801376,
+    "validation_f1": 0.8937017674881752,
+    "created_at": "2026-05-18 07:02:48"
+}

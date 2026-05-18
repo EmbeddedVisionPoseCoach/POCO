@@ -23,6 +23,8 @@ SCALER_PATH = 'saved_model/posture_scaler.pkl' # StandardScaler 객체 저장 �
 
 MODEL_FACE_PATH = 'saved_model/face_model.tflite'
 SCALER_FACE_PATH = 'saved_model/face_scaler.pkl'
+MODEL_FACE_PATH_GRU = 'saved_model/face_model_gru.tflite'
+SCALER_FACE_PATH_GRU = 'saved_model/face_scaler_gru.pkl'
 
 BASELINE_PATH = 'saved_model/baseline.pkl'
 
