@@ -81,8 +81,8 @@ STRIDE = 5             # 추론 주기 (프레임 단위)
 MODEL_VERSION_MLP = "mlp"
 MODEL_VERSION_GRU = "gru"
 
-# MODEL_VERSION = MODEL_VERSION_MLP
-MODEL_VERSION = MODEL_VERSION_GRU
+MODEL_VERSION = MODEL_VERSION_MLP
+# MODEL_VERSION = MODEL_VERSION_GRU
 
 
 
@@ -91,7 +91,7 @@ MODEL_VERSION = MODEL_VERSION_GRU
 # ------------------------------------------------------------
 
 # Windows 개발 환경에서는 False 추천
-HARDWARE_ENABLED = False
+HARDWARE_ENABLED = True
 
 # 아두이노가 연결된 포트 이름
 # 라즈베리파이에서는 보통 Arduino Uno가 /dev/ttyACM0 또는 /dev/ttyUSB0로 잡힘

@@ -1,15 +1,17 @@
 import sys
 import time
 import traceback
+import platform
 from enum import Enum, auto
 from pathlib import Path
 
-import cv2
 import mediapipe as mp
 import numpy as np
 
 from PyQt5.QtCore import QThread, pyqtSignal
 from PyQt5.QtGui import QImage
+
+import cv2
 
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
@@ -23,11 +25,130 @@ import modules.config as config
 from modules.features import calculate_features
 from modules.visualizer import Visualizer
 
-# services 폴더는 pyQt/services 안에 있으므로 이렇게 import
 from services.calibration_service import CalibrationService
 from services.mlp_inference_service import FrameInferenceService
 from services.gru_inference_service import GruInferenceService
 from services.hardware_controller import HardwareController
+
+
+# =========================================================
+# Camera Source Wrappers
+# =========================================================
+
+class OpenCVCameraSource:
+    """
+    Windows / 일반 Linux 웹캠용 카메라 래퍼.
+
+    내부적으로 cv2.VideoCapture를 사용하지만,
+    외부에서는 Picamera2Source와 동일하게
+    open(), start(), read(), release() 형태로 사용한다.
+    """
+
+    def __init__(self, camera_index=0, width=640, height=480):
+        self.camera_index = camera_index
+        self.width = width
+        self.height = height
+        self.cap = None
+
+    def open(self):
+        self.cap = cv2.VideoCapture(self.camera_index)
+
+        if not self.cap.isOpened():
+            raise RuntimeError("OpenCV 기본 카메라를 열 수 없습니다.")
+
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+
+    def start(self):
+        """
+        cv2.VideoCapture는 별도의 start가 필요 없다.
+        Picamera2Source와 인터페이스를 맞추기 위해 비워둔다.
+        """
+        pass
+
+    def read(self):
+        if self.cap is None:
+            return False, None
+
+        ret, frame = self.cap.read()
+
+        if not ret or frame is None:
+            return False, None
+
+        # OpenCV는 BGR 프레임을 반환한다.
+        return True, frame
+
+    def release(self):
+        if self.cap is not None:
+            self.cap.release()
+            self.cap = None
+
+
+class PiCamera2Source:
+    """
+    Raspberry Pi Camera Module용 카메라 래퍼.
+
+    내부적으로 Picamera2를 사용하지만,
+    외부에서는 OpenCVCameraSource와 동일하게
+    open(), start(), read(), release() 형태로 사용한다.
+    """
+
+    def __init__(self, width=640, height=480):
+        self.width = width
+        self.height = height
+        self.picam2 = None
+
+    def open(self):
+        """
+        picamera2는 Windows에 없을 수 있으므로
+        파일 상단에서 import하지 않고 여기서 지연 import한다.
+        """
+        from picamera2 import Picamera2
+
+        self.picam2 = Picamera2()
+
+        camera_config = self.picam2.create_preview_configuration(
+            main={
+                # "format": "RGB888",
+                "size": (self.width, self.height),
+            }
+        )
+
+        self.picam2.configure(camera_config)
+
+    def start(self):
+        if self.picam2 is not None:
+            self.picam2.start()
+
+    def read(self):
+        if self.picam2 is None:
+            return False, None
+
+        frame = self.picam2.capture_array()
+
+        if frame is None:
+            return False, None
+
+        # Picamera2에서 RGB888로 받았으므로
+        # 기존 OpenCV 처리 흐름에 맞추기 위해 BGR로 변환한다.
+        frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+
+        return True, frame
+
+    def release(self):
+        if self.picam2 is not None:
+            try:
+                self.picam2.stop()
+            except Exception:
+                pass
+
+            try:
+                self.picam2.close()
+            except Exception:
+                pass
+
+            self.picam2 = None
+
 
 class RunMode(Enum):
     """
@@ -35,6 +156,9 @@ class RunMode(Enum):
 
     PREVIEW:
         카메라와 랜드마크만 보여주는 상태.
+
+    HARDWARE:
+        하드웨어 수평 보정 중인 상태.
 
     CALIBRATING:
         baseline.pkl 생성을 위해 feature를 수집하는 상태.
@@ -47,29 +171,23 @@ class RunMode(Enum):
     HARDWARE = auto()
     CALIBRATING = auto()
     MEASURING = auto()
-    
 
 
 class CameraWorker(QThread):
     """
     PyQt 카메라 처리 전용 Worker.
 
-    main.py의 핵심 흐름을 PyQt 구조로 가져온 버전이다.
-
     담당:
-    1. cv2.VideoCapture로 카메라 직접 실행
+    1. 실행 환경에 맞는 카메라 선택
+       - Linux: Picamera2 먼저 시도 후 실패하면 OpenCV fallback
+       - Windows: OpenCV 기본 카메라 사용
     2. MediaPipe Pose / FaceLandmarker 실행
     3. 프레임에 랜드마크 그리기
     4. calculate_features()로 pose feature 추출
     5. 현재 mode에 따라 CalibrationService 또는 InferenceService 호출
     6. QImage와 결과 dict를 PyQt UI로 emit
-
-    주의:
-    - PyQt에서는 modules.camera.CameraStream을 사용하지 않는다.
-    - CameraStream은 main.py 테스트용으로만 유지한다.
     """
 
-    # 스레드로 돌리다보니 직접 전달은 레이스 컨디션이나 스케줄러에 의해서 제대로 전달이 안될 수 있음
     frame_changed = pyqtSignal(QImage)
     status_changed = pyqtSignal(str)
     calibration_finished = pyqtSignal(bool, str)
@@ -83,7 +201,7 @@ class CameraWorker(QThread):
         self.mode = RunMode.PREVIEW
 
         # Camera / Vision
-        self.cap = None
+        self.camera = None
         self.viz = None
         self.pose_detector = None
         self.face_detector = None
@@ -139,8 +257,11 @@ class CameraWorker(QThread):
             # worker 시작 전에 버튼이 눌렸던 경우 처리
             self.apply_pending_command()
 
+            self.camera.start()
+            print("카메라 시작 성공")
+
             while self.running:
-                ret, frame = self.cap.read()
+                ret, frame = self.camera.read()
 
                 if not ret or frame is None:
                     self.emit_status_interval("카메라 프레임을 읽지 못했습니다.")
@@ -150,7 +271,10 @@ class CameraWorker(QThread):
                 frame = cv2.flip(frame, 1)
                 img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
-                mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=img_rgb )
+                mp_image = mp.Image(
+                    image_format=mp.ImageFormat.SRGB,
+                    data=img_rgb
+                )
 
                 # MediaPipe
                 results_pose = self.pose_detector.process(img_rgb)
@@ -198,9 +322,6 @@ class CameraWorker(QThread):
     def initialize_camera_system(self):
         """
         카메라와 MediaPipe 시스템을 초기화한다.
-
-        PyQt용 CameraWorker에서는 CameraStream을 쓰지 않고
-        cv2.VideoCapture를 직접 사용한다.
         """
 
         face_task_path = self.resolve_workspace_path(config.FACE_MODEL_PATH)
@@ -210,13 +331,8 @@ class CameraWorker(QThread):
                 f"FaceLandmarker 모델 파일을 찾을 수 없습니다:\n{face_task_path}"
             )
 
-        self.cap = cv2.VideoCapture(0)
-
-        if not self.cap.isOpened():
-            raise RuntimeError("카메라를 열 수 없습니다.")
-
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, config.FRAME_WIDTH)
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, config.FRAME_HEIGHT)
+        self.camera = self.create_camera_source()
+        print("카메라 초기화 성공")
 
         self.viz = Visualizer()
 
@@ -241,6 +357,70 @@ class CameraWorker(QThread):
         )
 
         self.face_detector = vision.FaceLandmarker.create_from_options(options)
+
+    def create_camera_source(self):
+        """
+        실행 환경에 따라 사용할 카메라 소스를 선택한다.
+
+        Linux:
+            1. Picamera2 먼저 시도
+            2. 실패하면 OpenCV 기본 카메라로 fallback
+
+        Windows:
+            1. OpenCV 기본 카메라 사용
+        """
+
+        width = config.FRAME_WIDTH
+        height = config.FRAME_HEIGHT
+
+        errors = []
+        system_name = platform.system().lower()
+
+        is_linux = system_name == "linux"
+
+        if is_linux:
+            try:
+                camera = PiCamera2Source(
+                    width=width,
+                    height=height,
+                )
+                camera.open()
+
+                self.status_changed.emit("Picamera2 카메라를 사용합니다.")
+                print("Picamera2 카메라 선택 완료")
+
+                return camera
+
+            except Exception as e:
+                error_text = f"Picamera2 실패: {e}"
+                errors.append(error_text)
+                print(error_text)
+
+                self.status_changed.emit(
+                    "Picamera2 사용 실패. OpenCV 기본 카메라를 시도합니다."
+                )
+
+        try:
+            camera = OpenCVCameraSource(
+                camera_index=0,
+                width=width,
+                height=height,
+            )
+            camera.open()
+
+            self.status_changed.emit("OpenCV 기본 카메라를 사용합니다.")
+            print("OpenCV 카메라 선택 완료")
+
+            return camera
+
+        except Exception as e:
+            error_text = f"OpenCV 카메라 실패: {e}"
+            errors.append(error_text)
+            print(error_text)
+
+        raise RuntimeError(
+            "사용 가능한 카메라를 찾지 못했습니다.\n" + "\n".join(errors)
+        )
 
     # ---------------------------------------------------------
     # Pending Command
@@ -296,14 +476,10 @@ class CameraWorker(QThread):
             self.status_changed.emit("카메라 준비 중입니다. 준비되면 초기 측정을 시작합니다.")
             return
 
-
         # 하드웨어 모드 진입
         self.mode = RunMode.HARDWARE
         self.HarwareInit_requested = True
         self.status_changed.emit("카메라 수평 보정을 시작합니다.")
-
-        # result = self.calibration_service.start()
-        # self.status_changed.emit(result.message)
 
     def start_measurement(self):
         """
@@ -338,6 +514,7 @@ class CameraWorker(QThread):
                     ui_emit_interval=0.5,
                     fatigue_threshold=0.5,
                 )
+
             elif model_version == "gru":
                 self.inference_service = GruInferenceService(
                     model_path=self.resolve_workspace_path(config.MODEL_PATH_GRU),
@@ -348,6 +525,7 @@ class CameraWorker(QThread):
                     labels=config.POSTURE_LABELS,
                     ui_emit_interval=0.5,
                 )
+
             else:
                 self.measurement_started.emit(
                     False,
@@ -376,8 +554,6 @@ class CameraWorker(QThread):
     def stop_measurement(self):
         """
         추론만 종료하고 카메라는 유지하고 싶을 때 사용한다.
-
-        추론 종료 버튼을 따로 만들면 이 함수를 연결하면 된다.
         """
 
         if self.inference_service is not None:
@@ -393,10 +569,17 @@ class CameraWorker(QThread):
     def process_by_mode(self, raw_features, results_face):
         """
         현재 mode에 따라 feature를 처리한다.
-        CALIBRATING :  calibrationMain.py를 수행한다 보시면 됩니다.
-        MEASURING : 기존 main.py를 수행한다 보시면 됩니다.
+
+        HARDWARE:
+            하드웨어 수평 보정 후 캘리브레이션 시작
+
+        CALIBRATING:
+            baseline feature 수집
+
+        MEASURING:
+            실시간 자세 / 피로도 추론
         """
-        
+
         if self.mode == RunMode.HARDWARE:
             self.process_HardWare_then_calibration()
 
@@ -405,7 +588,6 @@ class CameraWorker(QThread):
 
         elif self.mode == RunMode.MEASURING:
             self.process_measurement(raw_features, results_face)
-
 
     def process_HardWare_then_calibration(self):
         """
@@ -432,12 +614,9 @@ class CameraWorker(QThread):
         self.mode = RunMode.CALIBRATING
         self.status_changed.emit(result.message)
 
-
-
     def process_calibration(self, raw_features):
         """
         CalibrationService에 feature를 넘겨 baseline을 수집한다.
-        update함수 : while에서 반복적으로 돌아가는부분을 Update에서 처리해줌
         """
 
         result = self.calibration_service.update(raw_features)
@@ -454,7 +633,6 @@ class CameraWorker(QThread):
 
         self.status_changed.emit(final_message)
         self.calibration_finished.emit(result.success, final_message)
-
 
     def process_measurement(self, raw_features, results_face):
         """
@@ -604,9 +782,9 @@ class CameraWorker(QThread):
         카메라와 MediaPipe 리소스를 정리한다.
         """
 
-        if self.cap is not None:
-            self.cap.release()
-            self.cap = None
+        if self.camera is not None:
+            self.camera.release()
+            self.camera = None
 
         if self.pose_detector is not None:
             self.pose_detector.close()
@@ -615,12 +793,9 @@ class CameraWorker(QThread):
         if self.hardware_controller is not None:
             self.hardware_controller.close()
 
-
         if self.face_detector is not None:
             self.face_detector.close()
             self.face_detector = None
-
-            
 
         if show_message:
             self.status_changed.emit("카메라가 종료되었습니다.")
