@@ -504,10 +504,6 @@ class MainWindow(QMainWindow):
 
 
     def on_save_settings_clicked(self):
-        """
-        설정 저장 버튼 클릭 이벤트.
-        """
-
         settings = self.collect_settings_from_ui()
 
         self.settings_manager.save(settings)
@@ -515,13 +511,15 @@ class MainWindow(QMainWindow):
 
         self.set_status("설정이 저장되었습니다.")
 
-        if self.camera_worker is None : 
-            self.ensure_camera_worker()
+        # 절대 여기서 ensure_camera_worker() 호출하지 않기
+        # 설정 저장만 했는데 카메라가 켜지는 원인이 됨
 
-        if not self.camera_worker.hardware_controller :
+        if (
+            self.camera_worker is not None
+            and self.camera_worker.hardware_controller is not None
+        ):
             print("[MainWindow] 하드웨어 컨트롤러에 새로운 설정값 적용")
             self.camera_worker.hardware_controller.set_hardware_Values(settings)
-
 
         QMessageBox.information(
             self,
