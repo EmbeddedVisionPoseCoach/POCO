@@ -340,10 +340,11 @@ class CameraWorker(QThread):
                 )
             elif model_version == "gru":
                 self.inference_service = GruInferenceService(
-                    model_path=self.resolve_workspace_path(config.MODEL_PATH),
-                    face_model_path=self.resolve_workspace_path(config.MODEL_FACE_PATH),
-                    scaler_path=self.resolve_workspace_path(config.SCALER_PATH),
-                    face_scaler_path=self.resolve_workspace_path(config.SCALER_FACE_PATH),
+                    model_path=self.resolve_workspace_path(config.MODEL_PATH_GRU),
+                    face_model_path=self.resolve_workspace_path(config.MODEL_FACE_PATH_GRU),
+                    scaler_path=self.resolve_workspace_path(config.SCALER_PATH_GRU),
+                    face_scaler_path=self.resolve_workspace_path(config.SCALER_FACE_PATH_GRU),
+                    base_line_path=self.resolve_workspace_path(config.BASELINE_PATH),
                     labels=config.POSTURE_LABELS,
                     ui_emit_interval=0.5,
                 )
