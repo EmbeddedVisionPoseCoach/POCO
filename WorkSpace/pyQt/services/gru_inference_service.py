@@ -376,7 +376,7 @@ class GruInferenceService:
             self.pose_output_details[0]["index"]
         )
 
-        label_index, confidence = self.parse_output(output)
+        label_index, confidence = self.parse_output_pose(output)
 
         label = self.labels.get(label_index, f"Unknown({label_index})")
 
@@ -416,6 +416,48 @@ class GruInferenceService:
         # print(f"face_label : {label}")
 
         return label, confidence
+    
+
+
+    def parse_output_pose(self, output):
+        """
+        TFLite 출력 형태를 label_index / confidence로 변환한다.
+
+        지원:
+        - [[0.1, 0.9]] 같은 softmax 배열
+        - [[0.87]] 같은 단일 확률
+        """
+
+        output = np.asarray(output)
+        probs = np.squeeze(output)
+
+        # hand_visible = output[-1]
+        # probs = np.squeeze(output)
+
+        # if len(probs) > 3 and hand_visible == 0:
+        #     probs[3] = 0
+
+        # 단일 확률 출력
+        if probs.ndim == 0:
+            probability = float(probs)
+            label_index = 1 if probability >= 0.5 else 0
+            confidence = probability if label_index == 1 else 1.0 - probability
+            return label_index, confidence
+
+        if probs.ndim == 1 and probs.shape[0] == 1:
+            probability = float(probs[0])
+            label_index = 1 if probability >= 0.5 else 0
+            confidence = probability if label_index == 1 else 1.0 - probability
+            return label_index, confidence
+
+        # softmax 출력
+        label_index = int(np.argmax(probs))
+        confidence = float(probs[label_index])
+
+
+        return label_index, confidence
+
+
 
     def parse_output(self, output):
         """
@@ -428,11 +470,6 @@ class GruInferenceService:
 
         output = np.asarray(output)
         probs = np.squeeze(output)
-
-        # hand_visible = pose_features[-1]
-
-        # if len(probs) > 3 and hand_visible == 0:
-        #     probs[3] = 0
 
         # 단일 확률 출력
         if probs.ndim == 0:
