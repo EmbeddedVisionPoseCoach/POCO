@@ -1,3 +1,4 @@
+import os
 import sys
 import time
 from dataclasses import dataclass
@@ -61,6 +62,7 @@ class GruInferenceService:
         face_model_path,
         scaler_path,
         face_scaler_path,
+        base_line_path,
         labels=None,
         ui_emit_interval=0.5,
         log_dir="../data/session_log",
@@ -69,6 +71,9 @@ class GruInferenceService:
         self.face_model_path = str(face_model_path)
         self.scaler_path = str(scaler_path)
         self.face_scaler_path = str(face_scaler_path)
+
+        self.base_line = self.load_baseline(base_line_path)
+        print(f"self.base_line : {self.base_line}")
 
         self.labels = labels if labels is not None else config.POSTURE_LABELS
         self.face_labels = config.FACE_LABELS
@@ -186,11 +191,14 @@ class GruInferenceService:
             )
 
         self.frame_count += 1
-
-
-
         safe_pose_features = self.build_pose_features(pose_features)
         safe_face_features = self.build_face_features(results_face)
+
+        safe_pose_features = np.array(safe_pose_features)- self.base_line
+        safe_pose_features = list(safe_pose_features)
+        
+        # safe_face_features = np.array(safe_face_features)- self.base_line
+
 
         self.pose_window.append(safe_pose_features)
         self.face_window.append(safe_face_features)
@@ -420,10 +428,10 @@ class GruInferenceService:
         output = np.asarray(output)
         probs = np.squeeze(output)
 
-        hand_visible = pose_features[-1]
+        # hand_visible = pose_features[-1]
 
-        if len(probs) > 3 and hand_visible == 0:
-            probs[3] = 0
+        # if len(probs) > 3 and hand_visible == 0:
+        #     probs[3] = 0
 
         # 단일 확률 출력
         if probs.ndim == 0:
@@ -502,3 +510,11 @@ class GruInferenceService:
             "fatigue_label": fatigue_label,
             "fatigue_probability": float(fatigue_probability),
         })
+
+    def load_baseline(self, path):
+        if os.path.exists(path):
+            print(f"✅ 기준값 로드 완료: {path}")
+            return joblib.load(path)
+        else:
+            print("⚠️ 기준값 파일이 없어 모든 피처를 0으로 초기화합니다.")
+            return np.zeros(config.POSE_FEATURE_SIZE)# 피처가 11개인 경우
