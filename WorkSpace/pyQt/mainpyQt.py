@@ -17,7 +17,7 @@ sys.path.append(str(ROOT_DIR))
 
 import modules.config as config
 from camera_worker import CameraWorker
-
+from modules.app_settings import SettingsManager, AlarmSettings
 
 import warnings
 
@@ -44,13 +44,19 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
 
-        ui_path = Path(__file__).parent / "ui" / "pocoApplication.ui"
+        ui_path = Path(__file__).parent / "ui" / "pocoApplication_Qss.ui"
+        # ui_path = Path(__file__).parent / "ui" / "pocoApplication.ui"
         uic.loadUi(str(ui_path), self)
 
         self.camera_worker = None
         self.streamlit_process = None
         self.streamlit_port = 8501
 
+        # 설정 저장 경로
+        self.settings_manager = SettingsManager(
+            ROOT_DIR / "data" / "settings" / "alarm_settings.json"
+        )
+        self.current_alarm_settings = None
 
         self.btnCalibration.clicked.connect(self.on_calibration_clicked)
         self.btnCalibrationStart.clicked.connect(self.on_calibration_start_clicked)
@@ -60,9 +66,16 @@ class MainWindow(QMainWindow):
         if hasattr(self, "btnReport"):
             self.btnReport.clicked.connect(self.on_report_clicked)
 
+        if hasattr(self, "btnSaveSettings"):
+            self.btnSaveSettings.clicked.connect(self.on_save_settings_clicked)
+
+        if hasattr(self, "checkAlarmEnabled"):
+            self.checkAlarmEnabled.toggled.connect(self.on_alarm_enabled_toggled)
+
         self.initialize_camera_label()
         self.initialize_button_state()
         self.initialize_realtime_labels()
+        self.initialize_settings_ui()
 
     # ---------------------------------------------------------
     # Initialize
@@ -371,6 +384,214 @@ class MainWindow(QMainWindow):
                 self.streamlit_process.terminate()
 
         event.accept()
+        
+    # ---------------------------------------------------------
+    # Settings
+    # ---------------------------------------------------------
+    def initialize_settings_ui(self):
+        """
+        프로그램 시작 시 설정 JSON을 불러와서 설정 탭 UI에 반영한다.
+        JSON 파일이 없으면 기본값으로 JSON 파일을 자동 생성한다.
+        """
+
+        settings = self.settings_manager.load()
+        self.current_alarm_settings = settings
+
+        self.apply_settings_to_ui(settings)
+
+        if hasattr(self, "checkAlarmEnabled"):
+            self.on_alarm_enabled_toggled(self.checkAlarmEnabled.isChecked())
+
+
+    def apply_settings_to_ui(self, settings):
+        """
+        AlarmSettings 값을 실제 UI 위젯에 반영한다.
+        """
+
+        if hasattr(self, "checkAlarmEnabled"):
+            self.checkAlarmEnabled.setChecked(settings.alarm_enabled)
+
+        self.set_spinbox_value(
+            "spinBadPostureDurationSec",
+            settings.bad_posture_duration_sec
+        )
+
+        self.set_spinbox_value(
+            "spinFatigueDurationSec",
+            settings.fatigue_duration_sec
+        )
+
+        self.set_spinbox_value(
+            "spinRepeatAlarmSec",
+            settings.repeat_alarm_sec
+        )
+
+        ## 추가
+        # posture_Hardware_count 자세 LED/부저 반복 횟수
+        self.set_spinbox_value(
+            "spinPostureAlertCount",
+            settings.posture_Hardware_count
+        )
+
+        # fatigue_Hardware_count 졸음 LED/부저 반복 횟수
+        self.set_spinbox_value(
+            "spinDrowsyAlertCount",
+            settings.fatigue_Hardware_count
+        )
+
+        # posture_Strong_limit 자세 강함 알림 횟수
+        self.set_spinbox_value(
+            "spinPostureStrongLimit",
+            settings.posture_Strong_limit
+        )
+
+        # fatigue_Strong_limit 졸음 강함 알림 횟수
+        self.set_spinbox_value(
+            "spinDrowsyStrongLimit",
+            settings.fatigue_Strong_limit
+        )
+
+
+        # strong_alert_cooldown_min 강한 알림 후 쿨타임
+        self.set_spinbox_value(
+            "spinStrongAlertCooldownMin",
+            settings.strong_alert_cooldown_min
+        )
+
+
+
+
+
+    def collect_settings_from_ui(self):
+        """
+        현재 설정 탭 UI 값을 읽어서 AlarmSettings 객체로 만든다.
+        """
+
+        alarm_enabled = True
+
+        if hasattr(self, "checkAlarmEnabled"):
+            alarm_enabled = self.checkAlarmEnabled.isChecked()
+
+        return AlarmSettings(
+            alarm_enabled=alarm_enabled,
+            bad_posture_duration_sec=self.get_spinbox_value(
+                "spinBadPostureDurationSec",
+                default_value=5
+            ),
+            fatigue_duration_sec=self.get_spinbox_value(
+                "spinFatigueDurationSec",
+                default_value=5
+            ),
+            repeat_alarm_sec=self.get_spinbox_value(
+                "spinRepeatAlarmSec",
+                default_value=10
+            ),
+            ## 추가
+            posture_Hardware_count=self.get_spinbox_value(
+                "spinPostureAlertCount",
+                default_value=5
+            ),
+            fatigue_Hardware_count=self.get_spinbox_value(
+                "spinDrowsyAlertCount",
+                default_value=3
+            ),
+            posture_Strong_limit=self.get_spinbox_value(
+                "spinPostureStrongLimit",
+                default_value=3
+            ),
+            fatigue_Strong_limit=self.get_spinbox_value(
+                "spinDrowsyStrongLimit",
+                default_value=2
+            ),
+            strong_alert_cooldown_min=self.get_spinbox_value(
+                "spinStrongAlertCooldownMin",
+                default_value=5
+            ),
+        )
+
+
+    def on_save_settings_clicked(self):
+        """
+        설정 저장 버튼 클릭 이벤트.
+        """
+
+        settings = self.collect_settings_from_ui()
+
+        self.settings_manager.save(settings)
+        self.current_alarm_settings = settings
+
+        self.set_status("설정이 저장되었습니다.")
+
+        QMessageBox.information(
+            self,
+            "설정 저장",
+            "알림 설정이 저장되었습니다."
+        )
+
+
+    def on_alarm_enabled_toggled(self, checked):
+        """
+        알림 사용 체크박스 상태에 따라
+        알림 관련 SpinBox들을 활성화/비활성화한다.
+        """
+
+        spinbox_names = [
+            "spinBadPostureDurationSec",
+            "spinFatigueDurationSec",
+            "spinRepeatAlarmSec",
+            "spinPostureAlertCount",
+            "spinDrowsyAlertCount",
+            "spinPostureStrongLimit",
+            "spinDrowsyStrongLimit",
+            "spinStrongAlertCooldownMin"
+        ]
+
+        for object_name in spinbox_names:
+            widget = getattr(self, object_name, None)
+
+            if widget is not None:
+                widget.setEnabled(checked)
+
+
+    def set_spinbox_value(self, object_name, value):
+        """
+        SpinBox에 값을 넣을 때 UI에 설정된 min/max 범위를 벗어나지 않게 보정한다.
+        """
+
+        widget = getattr(self, object_name, None)
+
+        if widget is None:
+            return
+
+        value = int(value)
+        value = max(widget.minimum(), min(widget.maximum(), value))
+
+        widget.setValue(value)
+
+
+    def get_spinbox_value(self, object_name, default_value):
+        """
+        SpinBox 값을 안전하게 가져온다.
+        """
+
+        widget = getattr(self, object_name, None)
+
+        if widget is None:
+            return default_value
+
+        return int(widget.value())
+
+
+    def get_current_alarm_settings(self):
+        """
+        다른 로직에서 현재 알림 설정이 필요할 때 사용한다.
+        """
+
+        if self.current_alarm_settings is None:
+            self.current_alarm_settings = self.settings_manager.load()
+
+        return self.current_alarm_settings
+
 
     # ------------------------------------------------------------------
     # Streamlit Report
@@ -494,8 +715,7 @@ class MainWindow(QMainWindow):
 
     def open_linux_browser(self, url):
         """
-        Raspberry Pi/Linux에서는 webbrowser.open()을 쓰면 lynx 같은
-        터미널 브라우저가 열릴 수 있어서 Chromium을 직접 실행한다.
+        Raspberry Pi/Linux에서는 Chromium을 전체화면 키오스크 모드로 실행한다.
         """
 
         browser_path = (
@@ -518,12 +738,19 @@ class MainWindow(QMainWindow):
 
         env = os.environ.copy()
 
-        # SSH에서 실행하더라도 RealVNC/라즈베리파이 GUI 화면에 띄우기 위한 기본값
+        # SSH에서 실행하더라도 라즈베리파이 GUI 화면에 띄우기 위한 기본값
         if "DISPLAY" not in env:
             env["DISPLAY"] = ":0"
 
         subprocess.Popen(
-            [browser_path, f"--app={url}"],
+            [
+                browser_path,
+                "--kiosk",
+                "--noerrdialogs",
+                "--disable-infobars",
+                "--disable-session-crashed-bubble",
+                url
+            ],
             env=env
         )
 
@@ -534,11 +761,22 @@ class MainWindow(QMainWindow):
 
         return 0
 
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_Escape:
+            if self.isFullScreen():
+                self.showNormal()
+            else:
+                self.showFullScreen()
+
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
 
     window = MainWindow()
-    window.show()
+
+    if platform.system() == "Linux":
+        window.showFullScreen()   # 라즈베리파이에서는 전체화면
+    else:
+        window.show()             # 윈도우 개발환경에서는 일반 창
 
     sys.exit(app.exec_())
