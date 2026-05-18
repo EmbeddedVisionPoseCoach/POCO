@@ -36,7 +36,7 @@ MODEL_FEATURE_ORDER = [
 def calculate_features(pose_landmarks, face_landmarks=None):
     # 포즈 랜드마크가 없으면 모든 피처를 0으로 초기화하여 반환
     if not pose_landmarks:
-        return [0.0] * 8
+        return [0.0] * len(FEATURE_NAMES)
 
     lm = pose_landmarks[0]
 

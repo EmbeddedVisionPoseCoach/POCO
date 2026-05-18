@@ -35,7 +35,6 @@ class CalibrationService:
         self.duration = duration
 
         self.feature_buffer = []
-        self.face_buffer = []
         self.start_time = None
         self.is_running = False
 
@@ -57,7 +56,7 @@ class CalibrationService:
             baseline_path=str(self.baseline_path)
         )
 
-    def update(self, raw_features, results_face):
+    def update(self, raw_features):
         """
         카메라 프레임마다 호출된다.
 
@@ -74,19 +73,13 @@ class CalibrationService:
 
         if raw_features is None:
             return self._build_running_result("아직 준비되지 않았습니다.")
-        if results_face is None:
-            return self._build_running_result("아직 준비되지 않았습니다.")
 
         feature_array = np.asarray(raw_features, dtype=np.float32)
-        face_array = np.asarray(results_face, dtype=np.float32)
 
         if feature_array.size == 0 or not np.any(feature_array):
             return self._build_running_result("자세를 다시 잡아주세요.")
-        if face_array.size == 0 or not np.any(face_array):
-            return self._build_running_result("얼굴을 다시 인식해주세요.")
 
         self.feature_buffer.append(feature_array)
-        self.face_buffer.append(face_array)
 
         elapsed = time.time() - self.start_time
         remain_time = max(0.0, self.duration - elapsed)

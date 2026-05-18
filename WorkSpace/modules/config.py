@@ -23,10 +23,17 @@ SCALER_PATH = 'saved_model/posture_scaler.pkl' # StandardScaler 객체 저장 �
 
 MODEL_FACE_PATH = 'saved_model/face_model.tflite'
 SCALER_FACE_PATH = 'saved_model/face_scaler.pkl'
-MODEL_FACE_PATH_GRU = 'saved_model/face_model_gru.tflite'
-SCALER_FACE_PATH_GRU = 'saved_model/face_scaler_gru.pkl'
+
+MODEL_PATH_GRU = 'saved_model/posture_model_GRU.tflite'
+SCALER_PATH_GRU = 'saved_model/posture_scaler_GRU.pkl' # StandardScaler 객체 저장 경로
+
+MODEL_FACE_PATH_GRU = 'saved_model/face_model_GRU.tflite'
+SCALER_FACE_PATH_GRU = 'saved_model/face_scaler_GRU.pkl'
+
+
 
 BASELINE_PATH = 'saved_model/baseline.pkl'
+FACE_BASELINE_PATH = 'saved_model/baseline_face.pkl'
 
 # 라벨링 및 색상 정보
 POSTURE_LABELS = {0: "Optimal", 1: "Asymmetric", 2: "Forward Head", 3: "Chin Propping"}
@@ -75,8 +82,8 @@ STRIDE = 5             # 추론 주기 (프레임 단위)
 MODEL_VERSION_MLP = "mlp"
 MODEL_VERSION_GRU = "gru"
 
-MODEL_VERSION = MODEL_VERSION_MLP
-# MODEL_VERSION = MODEL_VERSION_GRU
+# MODEL_VERSION = MODEL_VERSION_MLP
+MODEL_VERSION = MODEL_VERSION_GRU
 
 
 
