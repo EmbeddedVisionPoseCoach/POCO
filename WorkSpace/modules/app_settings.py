@@ -8,7 +8,6 @@ class AlarmSettings:
     alarm_enabled: bool = True
     bad_posture_duration_sec: int = 5
     fatigue_duration_sec: int = 5
-    repeat_alarm_sec: int = 10
     posture_Hardware_count: int = 5
     fatigue_Hardware_count: int = 3
     posture_Strong_limit: int = 3
@@ -43,12 +42,7 @@ class AlarmSettings:
                 max_value=300,
                 default_value=default.fatigue_duration_sec
             ),
-            repeat_alarm_sec=cls._clamp_int(
-                data.get("repeat_alarm_sec", default.repeat_alarm_sec),
-                min_value=1,
-                max_value=600,
-                default_value=default.repeat_alarm_sec
-            ),
+
             ## 추가
             posture_Hardware_count=cls._clamp_int(
                 data.get("posture_Hardware_count", default.posture_Hardware_count),

@@ -421,10 +421,6 @@ class MainWindow(QMainWindow):
             settings.fatigue_duration_sec
         )
 
-        self.set_spinbox_value(
-            "spinRepeatAlarmSec",
-            settings.repeat_alarm_sec
-        )
 
         ## 추가
         # posture_Hardware_count 자세 LED/부저 반복 횟수
@@ -482,10 +478,7 @@ class MainWindow(QMainWindow):
                 "spinFatigueDurationSec",
                 default_value=5
             ),
-            repeat_alarm_sec=self.get_spinbox_value(
-                "spinRepeatAlarmSec",
-                default_value=10
-            ),
+
             ## 추가
             posture_Hardware_count=self.get_spinbox_value(
                 "spinPostureAlertCount",
