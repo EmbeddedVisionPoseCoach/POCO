@@ -187,6 +187,8 @@ class GruInferenceService:
 
         self.frame_count += 1
 
+
+
         safe_pose_features = self.build_pose_features(pose_features)
         safe_face_features = self.build_face_features(results_face)
 
@@ -202,7 +204,10 @@ class GruInferenceService:
                 # print(f"pose_window : {self.pose_window.__len__()}")
 
                 posture_type, posture_confidence = self.predict_pose()
-                fatigue_label, fatigue_probability = self.predict_face()
+
+                # fatigue_label, fatigue_probability = self.predict_face()
+                fatigue_label, fatigue_probability = "Normal", 0.0
+
             except Exception as e:
                 return InferenceResult(
                     success=False,
@@ -414,6 +419,11 @@ class GruInferenceService:
 
         output = np.asarray(output)
         probs = np.squeeze(output)
+
+        hand_visible = pose_features[-1]
+
+        if len(probs) > 3 and hand_visible == 0:
+            probs[3] = 0
 
         # 단일 확률 출력
         if probs.ndim == 0:
