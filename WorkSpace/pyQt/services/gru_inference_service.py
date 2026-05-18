@@ -196,7 +196,64 @@ class GruInferenceService:
         elapsed_sec = self.get_elapsed_sec()
 
         # 아직 WINDOW_SIZE만큼 안 쌓였으면 최근 결과만 유지
-        if len(self.pose_window) < config.WINDOW_SIZE:
+        if len(self.pose_window) == config.WINDOW_SIZE and self.frame_count % config.STRIDE != 0:
+            try:
+                # print(f"face_window : {self.face_window.__len__()}")
+                # print(f"pose_window : {self.pose_window.__len__()}")
+
+                posture_type, posture_confidence = self.predict_pose()
+                fatigue_label, fatigue_probability = self.predict_face()
+            except Exception as e:
+                return InferenceResult(
+                    success=False,
+                    message=f"GRU 추론 오류: {e}"
+                )
+            
+            self.latest_posture_type = posture_type
+            self.latest_confidence = posture_confidence
+            self.latest_fatigue_label = fatigue_label
+            self.latest_fatigue_probability = fatigue_probability
+
+            normal_label = self.labels.get(0, "Optimal")
+
+            if posture_type != normal_label:
+                self.posture_counter[posture_type] += 1
+
+            should_emit_ui = self.should_emit_ui()
+
+            if should_emit_ui:
+                self.save_log(
+                    posture_type=posture_type,
+                    fatigue_label=fatigue_label,
+                    fatigue_probability=fatigue_probability,
+                )
+
+            return InferenceResult(
+                success=True,
+                message=f"GRU 측정 중: {posture_type} / {posture_confidence * 100:.1f}%",
+                should_emit_ui=should_emit_ui,
+                posture_type=posture_type,
+                confidence=posture_confidence,
+                fatigue_label=fatigue_label,
+                fatigue_probability=fatigue_probability,
+                elapsed_sec=elapsed_sec,
+                rank_text=self.build_rank_text(),
+            )
+
+
+        if self.latest_posture_type == "-" :
+            return InferenceResult(
+                success=False,
+                message=f"GRU 입력 수집 중: {len(self.pose_window)}/{config.WINDOW_SIZE}",
+                should_emit_ui=self.should_emit_ui(),
+                posture_type=self.latest_posture_type,
+                confidence=self.latest_confidence,
+                fatigue_label=self.latest_fatigue_label,
+                fatigue_probability=self.latest_fatigue_probability,
+                elapsed_sec=elapsed_sec,
+                rank_text=self.build_rank_text(),
+            )
+        else :
             return InferenceResult(
                 success=True,
                 message=f"GRU 입력 수집 중: {len(self.pose_window)}/{config.WINDOW_SIZE}",
@@ -209,60 +266,47 @@ class GruInferenceService:
                 rank_text=self.build_rank_text(),
             )
 
-        # STRIDE 간격이 아니면 추론하지 않고 최신 결과만 유지
-        if self.frame_count % config.STRIDE != 0:
-            return InferenceResult(
-                success=True,
-                message="GRU 최신 결과 유지 중",
-                should_emit_ui=self.should_emit_ui(),
-                posture_type=self.latest_posture_type,
-                confidence=self.latest_confidence,
-                fatigue_label=self.latest_fatigue_label,
-                fatigue_probability=self.latest_fatigue_probability,
-                elapsed_sec=elapsed_sec,
-                rank_text=self.build_rank_text(),
-            )
 
-        try:
-            posture_type, posture_confidence = self.predict_pose()
-            fatigue_label, fatigue_probability = self.predict_face()
+        # try:
+        #     posture_type, posture_confidence = self.predict_pose()
+        #     fatigue_label, fatigue_probability = self.predict_face()
 
-        except Exception as e:
-            return InferenceResult(
-                success=False,
-                message=f"GRU 추론 오류: {e}"
-            )
+        # except Exception as e:
+        #     return InferenceResult(
+        #         success=False,
+        #         message=f"GRU 추론 오류: {e}"
+        #     )
 
-        self.latest_posture_type = posture_type
-        self.latest_confidence = posture_confidence
-        self.latest_fatigue_label = fatigue_label
-        self.latest_fatigue_probability = fatigue_probability
+        # self.latest_posture_type = posture_type
+        # self.latest_confidence = posture_confidence
+        # self.latest_fatigue_label = fatigue_label
+        # self.latest_fatigue_probability = fatigue_probability
 
-        normal_label = self.labels.get(0, "Optimal")
+        # normal_label = self.labels.get(0, "Optimal")
 
-        if posture_type != normal_label:
-            self.posture_counter[posture_type] += 1
+        # if posture_type != normal_label:
+        #     self.posture_counter[posture_type] += 1
 
-        should_emit_ui = self.should_emit_ui()
+        # should_emit_ui = self.should_emit_ui()
 
-        if should_emit_ui:
-            self.save_log(
-                posture_type=posture_type,
-                fatigue_label=fatigue_label,
-                fatigue_probability=fatigue_probability,
-            )
+        # if should_emit_ui:
+        #     self.save_log(
+        #         posture_type=posture_type,
+        #         fatigue_label=fatigue_label,
+        #         fatigue_probability=fatigue_probability,
+        #     )
 
-        return InferenceResult(
-            success=True,
-            message=f"GRU 측정 중: {posture_type} / {posture_confidence * 100:.1f}%",
-            should_emit_ui=should_emit_ui,
-            posture_type=posture_type,
-            confidence=posture_confidence,
-            fatigue_label=fatigue_label,
-            fatigue_probability=fatigue_probability,
-            elapsed_sec=elapsed_sec,
-            rank_text=self.build_rank_text(),
-        )
+        # return InferenceResult(
+        #     success=True,
+        #     message=f"GRU 측정 중: {posture_type} / {posture_confidence * 100:.1f}%",
+        #     should_emit_ui=should_emit_ui,
+        #     posture_type=posture_type,
+        #     confidence=posture_confidence,
+        #     fatigue_label=fatigue_label,
+        #     fatigue_probability=fatigue_probability,
+        #     elapsed_sec=elapsed_sec,
+        #     rank_text=self.build_rank_text(),
+        # )
 
     # ---------------------------------------------------------
     # Feature
@@ -304,9 +348,10 @@ class GruInferenceService:
         model_input = np.asarray(self.pose_window, dtype=np.float32)
 
         # 팀원 코드 기준: [WINDOW_SIZE, FEATURE_SIZE]에서 scaler 적용
-        model_input = self.pose_scaler.transform(model_input)
 
-        input_tensor = np.expand_dims(model_input, axis=0).astype(np.float32)
+        model_input = model_input.reshape(1, -1)  # 2D 형태로 변환
+        model_input = self.pose_scaler.transform(model_input)
+        input_tensor = model_input.reshape(1 ,config.WINDOW_SIZE, config.POSE_FEATURE_SIZE)
 
         self.pose_interpreter.set_tensor(
             self.pose_input_details[0]["index"],
@@ -319,6 +364,7 @@ class GruInferenceService:
         )
 
         label_index, confidence = self.parse_output(output)
+
         label = self.labels.get(label_index, f"Unknown({label_index})")
 
         # print(f"Pose_Confidence : {confidence}")
@@ -330,9 +376,13 @@ class GruInferenceService:
     def predict_face(self):
         model_input = np.asarray(self.face_window, dtype=np.float32)
 
-        model_input = self.face_scaler.transform(model_input)
+        # model_input = self.face_scaler.transform(model_input.flatten())
+        # # input_tensor = np.expand_dims(model_input, axis=0).astype(np.float32)
+        # input_tensor = model_input.reshape(config.WINDOW_SIZE, config.FACE_FEATURE_SIZE)
 
-        input_tensor = np.expand_dims(model_input, axis=0).astype(np.float32)
+        model_input = model_input.reshape(1, -1)  # 2D 형태로 변환
+        model_input = self.face_scaler.transform(model_input)
+        input_tensor = model_input.reshape(1 ,config.WINDOW_SIZE, config.FACE_FEATURE_SIZE)
 
         self.face_interpreter.set_tensor(
             self.face_input_details[0]["index"],
