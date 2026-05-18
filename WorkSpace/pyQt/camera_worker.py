@@ -94,6 +94,8 @@ class CameraWorker(QThread):
             duration=config.CALIBRATION_TIME,
         )
 
+        print("초기화 성공")
+
         # 하드웨어 컨트롤러
         self.hardware_controller = HardwareController(
             enabled=config.HARDWARE_ENABLED,

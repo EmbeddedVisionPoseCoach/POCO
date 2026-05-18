@@ -6,6 +6,7 @@ from pathlib import Path
 ROOT_DIR = Path(__file__).resolve().parent.parent.parent
 sys.path.append(str(ROOT_DIR))
 
+from modules.app_settings import SettingsManager, AlarmSettings
 
 class HardwareController:
     """
@@ -82,6 +83,23 @@ class HardwareController:
             self.arduino = None
             print(f"[Hardware] 연결 실패: {e}")
             return False
+
+    def set_hardware_Values(self, settings : AlarmSettings):
+        print(f"[Hardware] 새로운 설정값 적용: {settings.alarm_enabled}")
+        print(f"[Hardware] 새로운 설정값 적용: {settings.posture_Hardware_count}")
+        print(f"[Hardware] 새로운 설정값 적용: {settings.fatigue_Hardware_count}")
+        print(f"[Hardware] 새로운 설정값 적용: {settings.bad_posture_duration_sec}")
+        print(f"[Hardware] 새로운 설정값 적용: {settings.fatigue_duration_sec}")
+        print(f"[Hardware] 새로운 설정값 적용: {settings.posture_Strong_limit}")
+        print(f"[Hardware] 새로운 설정값 적용: {settings.fatigue_Strong_limit}")
+        print(f"[Hardware] 새로운 설정값 적용: {settings.strong_alert_cooldown_min}")
+        
+        self.alert_enabled(settings.alert_enabled)
+        self.set_alert_counts(settings.posture_Hardware_count, settings.fatigue_Hardware_count)
+        self.set_hold_seconds(settings.bad_posture_duration_sec, settings.fatigue_duration_sec)
+        self.set_strong_alert_settings(settings.posture_Strong_limit, settings.fatigue_Strong_limit, settings.strong_alert_cooldown_min)
+
+
 
 
     def set_alert_enabled(self, enabled):

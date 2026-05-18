@@ -522,6 +522,14 @@ class MainWindow(QMainWindow):
 
         self.set_status("설정이 저장되었습니다.")
 
+        if self.camera_worker is None : 
+            self.ensure_camera_worker()
+
+        if not self.camera_worker.hardware_controller :
+            print("[MainWindow] 하드웨어 컨트롤러에 새로운 설정값 적용")
+            self.camera_worker.hardware_controller.set_hardware_Values(settings)
+
+
         QMessageBox.information(
             self,
             "설정 저장",
