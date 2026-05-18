@@ -194,7 +194,7 @@ class CameraWorker(QThread):
     measurement_started = pyqtSignal(bool, str)
     result_changed = pyqtSignal(dict)
 
-    def __init__(self, parent=None):
+    def __init__(self, hardware_controller=None, parent=None):
         super().__init__(parent)
 
         self.running = False
@@ -215,12 +215,17 @@ class CameraWorker(QThread):
         print("초기화 성공")
 
         # 하드웨어 컨트롤러
-        self.hardware_controller = HardwareController(
-            enabled=config.HARDWARE_ENABLED,
-            serial_port=config.HARDWARE_SERIAL_PORT,
-            baud_rate=config.HARDWARE_BAUD_RATE,
-            timeout=config.HARDWARE_TIMEOUT,
-        )
+        if hardware_controller is None:
+            self.hardware_controller = HardwareController(
+                enabled=config.HARDWARE_ENABLED,
+                serial_port=config.HARDWARE_SERIAL_PORT,
+                baud_rate=config.HARDWARE_BAUD_RATE,
+                timeout=config.HARDWARE_TIMEOUT,
+            )
+            self.owns_hardware_controller = True
+        else:
+            self.hardware_controller = hardware_controller
+            self.owns_hardware_controller = False
 
         self.inference_service = None
 
@@ -790,7 +795,7 @@ class CameraWorker(QThread):
             self.pose_detector.close()
             self.pose_detector = None
 
-        if self.hardware_controller is not None:
+        if (self.hardware_controller is not None and self.owns_hardware_controller):
             self.hardware_controller.close()
 
         if self.face_detector is not None:
