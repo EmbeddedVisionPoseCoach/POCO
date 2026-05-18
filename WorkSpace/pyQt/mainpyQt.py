@@ -654,8 +654,7 @@ class MainWindow(QMainWindow):
 
     def open_linux_browser(self, url):
         """
-        Raspberry Pi/Linux에서는 webbrowser.open()을 쓰면 lynx 같은
-        터미널 브라우저가 열릴 수 있어서 Chromium을 직접 실행한다.
+        Raspberry Pi/Linux에서는 Chromium을 전체화면 키오스크 모드로 실행한다.
         """
 
         browser_path = (
@@ -678,12 +677,19 @@ class MainWindow(QMainWindow):
 
         env = os.environ.copy()
 
-        # SSH에서 실행하더라도 RealVNC/라즈베리파이 GUI 화면에 띄우기 위한 기본값
+        # SSH에서 실행하더라도 라즈베리파이 GUI 화면에 띄우기 위한 기본값
         if "DISPLAY" not in env:
             env["DISPLAY"] = ":0"
 
         subprocess.Popen(
-            [browser_path, f"--app={url}"],
+            [
+                browser_path,
+                "--kiosk",
+                "--noerrdialogs",
+                "--disable-infobars",
+                "--disable-session-crashed-bubble",
+                url
+            ],
             env=env
         )
 
@@ -694,11 +700,22 @@ class MainWindow(QMainWindow):
 
         return 0
 
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_Escape:
+            if self.isFullScreen():
+                self.showNormal()
+            else:
+                self.showFullScreen()
+
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
 
     window = MainWindow()
-    window.show()
+
+    if platform.system() == "Linux":
+        window.showFullScreen()   # 라즈베리파이에서는 전체화면
+    else:
+        window.show()             # 윈도우 개발환경에서는 일반 창
 
     sys.exit(app.exec_())

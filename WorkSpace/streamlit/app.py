@@ -1,4 +1,9 @@
+import os
 import sys
+import time
+import platform
+import threading
+import subprocess
 from pathlib import Path
 from html import escape
 from textwrap import dedent
@@ -107,10 +112,65 @@ st.markdown(
         background-color: #F7F7F6;
     }
 
+    /* Raspberry Pi 800x480 대응 */
+    @media (max-width: 900px) {
+        .block-container {
+            padding-top: 0.35rem;
+            padding-bottom: 0.5rem;
+            padding-left: 0.45rem;
+            padding-right: 0.45rem;
+            max-width: 100%;
+        }
+
+        .main-header-wrap {
+            padding: 12px 14px;
+            margin-bottom: 10px;
+            border-radius: 12px;
+        }
+
+        .main-title {
+            font-size: 24px;
+        }
+
+        .main-sub {
+            font-size: 11px;
+            line-height: 1.45;
+        }
+
+        div[data-testid="stSelectbox"] label {
+            font-size: 12px;
+            margin-bottom: 2px;
+        }
+
+        div[data-testid="stSelectbox"] [data-baseweb="select"] > div {
+            min-height: 38px;
+            height: 38px;
+            font-size: 13px;
+        }
+
+        div[data-testid="stButton"] > button {
+            width: 100%;
+            min-height: 38px;
+            padding: 0.25rem 0.35rem;
+            font-size: 13px;
+            white-space: nowrap;
+        }
+
+        .refresh-button-spacer {
+            height: 26px;
+        }
+
+        .exit-button-spacer {
+            height: 26px;
+        }
+    }
+
     .block-container {
-        padding-top: 1.2rem;
-        padding-bottom: 2rem;
-        max-width: 1600px;
+        padding-top: 0.4rem;
+        padding-bottom: 0.6rem;
+        padding-left: 0.6rem;
+        padding-right: 0.6rem;
+        max-width: 100%;
     }
 
     .main-header-wrap {
@@ -186,6 +246,72 @@ st.markdown(
         font-size: 13px;
         color: #9a9a9a;
         line-height: 1.4;
+    }
+
+    /* 3개짜리 카드 행 - 살짝 축소 */
+    .metric-card-small {
+        padding: 18px 20px;
+        min-height: 138px;
+    }
+
+    .metric-card-small .metric-top {
+        margin-bottom: 10px;
+    }
+
+    .metric-card-small .metric-title {
+        font-size: 14px;
+    }
+
+    .metric-card-small .metric-value {
+        font-size: 34px;
+        margin-bottom: 6px;
+    }
+
+    .metric-card-small .metric-sub {
+        font-size: 12px;
+    }
+
+    .metric-card-small .metric-icon-box {
+        width: 36px;
+        height: 36px;
+        border-radius: 11px;
+        font-size: 16px;
+    }
+
+    /* 4개짜리 카드 행 - 더 많이 축소 */
+    .metric-card-tiny {
+        padding: 14px 12px;
+        min-height: 118px;
+        border-radius: 14px;
+    }
+
+    .metric-card-tiny .metric-top {
+        margin-bottom: 8px;
+    }
+
+    .metric-card-tiny .metric-title {
+        font-size: 12px;
+        line-height: 1.25;
+        letter-spacing: -0.4px;
+    }
+
+    .metric-card-tiny .metric-value {
+        font-size: 24px;
+        line-height: 1.15;
+        margin-bottom: 4px;
+        letter-spacing: -0.5px;
+    }
+
+    .metric-card-tiny .metric-sub {
+        font-size: 11px;
+        line-height: 1.3;
+    }
+
+    .metric-card-tiny .metric-icon-box {
+        width: 30px;
+        height: 30px;
+        border-radius: 9px;
+        font-size: 13px;
     }
 
     .table-card {
@@ -326,6 +452,136 @@ st.markdown(
         margin-top: -4px;
         margin-bottom: 8px;
     }
+
+
+    /* Raspberry Pi 800x480 최종 보정: 이 블록은 CSS 맨 아래에 있어야 한다. */
+    @media (max-width: 900px) {
+        .block-container {
+            padding-top: 0.35rem;
+            padding-bottom: 0.5rem;
+            padding-left: 0.45rem;
+            padding-right: 0.45rem;
+            max-width: 100%;
+        }
+
+        .main-header-wrap {
+            padding: 12px 14px;
+            margin-bottom: 10px;
+            border-radius: 12px;
+        }
+
+        .main-title {
+            font-size: 24px;
+        }
+
+        .main-sub {
+            font-size: 11px;
+            line-height: 1.45;
+        }
+
+        .section-title {
+            font-size: 16px;
+            margin-top: 6px;
+            margin-bottom: 8px;
+        }
+
+        div[data-testid="stSelectbox"] label {
+            font-size: 12px;
+            margin-bottom: 2px;
+        }
+
+        div[data-testid="stSelectbox"] [data-baseweb="select"] > div {
+            min-height: 38px;
+            height: 38px;
+            font-size: 13px;
+        }
+
+        div[data-testid="stButton"] > button {
+            width: 100%;
+            min-height: 38px;
+            padding: 0.25rem 0.35rem;
+            font-size: 13px;
+            white-space: nowrap;
+        }
+
+        .refresh-button-spacer {
+            height: 26px;
+        }
+
+        .exit-button-spacer {
+            height: 26px;
+        }
+
+        .metric-card-small {
+            padding: 14px 14px;
+            min-height: 118px;
+            border-radius: 14px;
+        }
+
+        .metric-card-small .metric-top {
+            margin-bottom: 8px;
+        }
+
+        .metric-card-small .metric-title {
+            font-size: 12px;
+            line-height: 1.25;
+            letter-spacing: -0.3px;
+        }
+
+        .metric-card-small .metric-value {
+            font-size: 26px;
+            line-height: 1.15;
+            margin-bottom: 4px;
+            letter-spacing: -0.4px;
+        }
+
+        .metric-card-small .metric-sub {
+            font-size: 11px;
+        }
+
+        .metric-card-small .metric-icon-box {
+            width: 30px;
+            height: 30px;
+            border-radius: 9px;
+            font-size: 13px;
+        }
+
+        .metric-card-tiny {
+            padding: 10px 8px;
+            min-height: 96px;
+            border-radius: 12px;
+        }
+
+        .metric-card-tiny .metric-top {
+            margin-bottom: 6px;
+        }
+
+        .metric-card-tiny .metric-title {
+            font-size: 10px;
+            line-height: 1.2;
+            letter-spacing: -0.5px;
+        }
+
+        .metric-card-tiny .metric-value {
+            font-size: 18px;
+            line-height: 1.15;
+            margin-bottom: 2px;
+            letter-spacing: -0.6px;
+        }
+
+        .metric-card-tiny .metric-sub {
+            font-size: 10px;
+            line-height: 1.2;
+        }
+
+        .metric-card-tiny .metric-icon-box {
+            width: 24px;
+            height: 24px;
+            border-radius: 8px;
+            font-size: 11px;
+        }
+    }
+
     </style>
     """,
     unsafe_allow_html=True
@@ -381,11 +637,35 @@ def get_fatigue_color(label: str) -> str:
     return FATIGUE_COLOR_MAP.get(label, "#9aa3af")
 
 
-def render_metric_card(title: str, value: str, sub_text: str, color: str, icon: str) -> None:
+def render_metric_card(
+    title: str,
+    value: str,
+    sub_text: str,
+    color: str,
+    icon: str,
+    card_size: str = "default"
+) -> None:
+    """
+    Metric 카드 렌더링 함수.
+
+    card_size:
+    - default: 기본 카드
+    - small  : 3개짜리 행 카드용
+    - tiny   : 4개짜리 행 카드용
+    """
     icon_bg = f"{color}15"
+
+    card_class = "metric-card"
+
+    if card_size == "small":
+        card_class += " metric-card-small"
+
+    elif card_size == "tiny":
+        card_class += " metric-card-tiny"
+
     st.markdown(
         f"""
-        <div class="metric-card">
+        <div class="{card_class}">
             <div class="metric-top">
                 <div class="metric-title">{escape(title)}</div>
                 <div class="metric-icon-box" style="background:{icon_bg}; color:{color};">{escape(icon)}</div>
@@ -1329,9 +1609,11 @@ def prepare_minute_df(summary_data: dict, raw_log_df: pd.DataFrame) -> pd.DataFr
 
 def format_session_date_option(date_text: str) -> str:
     date_value = pd.to_datetime(date_text, errors="coerce")
+
     if pd.isna(date_value):
         return date_text
-    return date_value.strftime("%Y년 %m월 %d일")
+
+    return date_value.strftime("%Y-%m-%d")
 
 
 def get_session_date_text(summary_data: dict, selected_date: str) -> str:
@@ -1360,6 +1642,75 @@ def get_session_time_text(raw_log_df: pd.DataFrame, summary_data: dict | None = 
 def clear_session_cache() -> None:
     st.cache_data.clear()
     st.rerun()
+
+
+def close_linux_report_browser() -> None:
+    """
+    Raspberry Pi/Linux 키오스크 환경에서 Streamlit 리포트를 띄운 Chromium 창을 종료한다.
+
+    PyQt 쪽에서 Chromium을 --kiosk 또는 --app 형태로 실행했을 때,
+    명령줄에 localhost:8501이 포함되므로 해당 브라우저 프로세스만 종료한다.
+    """
+
+    if platform.system() != "Linux":
+        return
+
+    patterns = [
+        "chromium.*localhost:8501",
+        "chromium-browser.*localhost:8501",
+        "google-chrome.*localhost:8501",
+    ]
+
+    for pattern in patterns:
+        try:
+            subprocess.run(
+                ["pkill", "-f", pattern],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False
+            )
+        except Exception:
+            pass
+
+
+def shutdown_streamlit_report(delay_sec: float = 0.8) -> None:
+    """
+    종료 버튼 클릭 후 Streamlit 서버를 종료한다.
+
+    버튼 클릭 응답이 브라우저에 먼저 전달될 수 있도록
+    아주 짧은 지연 후 별도 스레드에서 종료한다.
+    """
+
+    def delayed_shutdown():
+        time.sleep(delay_sec)
+
+        close_linux_report_browser()
+
+        # 현재 Streamlit 서버 프로세스 종료
+        os._exit(0)
+
+    threading.Thread(target=delayed_shutdown, daemon=True).start()
+
+
+def render_exit_script() -> None:
+    """
+    브라우저 창 닫기를 요청한다.
+
+    일반 브라우저에서는 보안 정책 때문에 window.close()가 막힐 수 있지만,
+    PyQt에서 Chromium 앱/키오스크 모드로 연 경우에는 보조적으로 동작할 수 있다.
+    """
+
+    st.markdown(
+        """
+        <script>
+            setTimeout(function() {
+                window.open('', '_self');
+                window.close();
+            }, 300);
+        </script>
+        """,
+        unsafe_allow_html=True
+    )
 
 
 def render_session_debug_info(available_dates: list[str]) -> None:
@@ -1399,7 +1750,7 @@ header_placeholder = st.empty()
 # 상단 세션 날짜 선택
 # ------------------------------------------------------------
 
-col_date, col_refresh, _ = st.columns([1.2, 0.9, 4.1])
+col_date, col_refresh, col_exit = st.columns([2.0, 1.0, 0.9], gap="small")
 
 with col_date:
     selected_session_date = st.selectbox(
@@ -1411,19 +1762,26 @@ with col_date:
     )
 
 with col_refresh:
-    st.write("")  # 버튼 높이 맞추기용
-    if st.button("리포트 새로고침", key="refresh_report_button"):
-        # Streamlit 캐시 초기화
+    st.markdown('<div class="refresh-button-spacer"></div>', unsafe_allow_html=True)
+
+    if st.button("새로고침", key="refresh_report_button", use_container_width=True):
         st.cache_data.clear()
 
-        # 선택한 날짜의 기존 리포트 JSON 삭제
         report_path = get_report_summary_path(selected_session_date)
 
         if report_path.exists():
             report_path.unlink()
 
-        # 앱 다시 실행 → CSV 기준으로 report_summary 재생성
         st.rerun()
+
+with col_exit:
+    st.markdown('<div class="exit-button-spacer"></div>', unsafe_allow_html=True)
+
+    if st.button("종료", key="exit_report_button", use_container_width=True, type="primary"):
+        render_exit_script()
+        st.success("리포트를 종료합니다.")
+        shutdown_streamlit_report()
+        st.stop()
 
 
 summary, raw_df = load_selected_session_data(
@@ -1506,7 +1864,8 @@ with tab_report:
             # f"비율 {format_percent_from_ratio(posture_summary['bad_ratio'])}",
             "",
             "#f44444",
-            "!"
+            "!",
+            card_size="small"
         )
     with c2:
         render_metric_card(
@@ -1515,7 +1874,8 @@ with tab_report:
             # f"비율 {format_percent_from_ratio(fatigue_summary['drowsy_ratio'])}",
             "",
             "#8b5cf6",
-            "◔"
+            "◔",
+            card_size="small"
         )    
     with c3:
         render_metric_card(
@@ -1524,7 +1884,8 @@ with tab_report:
             # f"전체 로그 {session['row_count']}개",
             "",
             "#173a6a",
-            "⏱"
+            "⏱",
+            card_size="small"
         ) 
 
 
@@ -1596,7 +1957,8 @@ with tab_posture:
             # "ForwardHead 감지 누적",
             "",
             "#ff7a17",
-            "◌"
+            "◌",
+            card_size="tiny"
         )
     with p2:
         render_metric_card(
@@ -1605,7 +1967,8 @@ with tab_posture:
             # "ChinRest 감지 누적",
             "",
             "#f5a000",
-            "◍"
+            "◍",
+            card_size="tiny"
         )
     with p3:
         render_metric_card(
@@ -1614,7 +1977,8 @@ with tab_posture:
             # "Asymmetry 감지 누적",
             "",
             "#f44444",
-            "⚖"
+            "⚖",
+            card_size="tiny"
         )
     with p4:
         render_metric_card(
@@ -1623,7 +1987,8 @@ with tab_posture:
             # f"정자세 유지율 {format_percent_from_ratio(posture_summary['good_ratio'])}",
             "",
             "#19b87a",
-            "✓"
+            "✓",
+            card_size="tiny"
         )
 
     st.write("")
@@ -1813,7 +2178,8 @@ with tab_fatigue:
             f"{score_summary['fatigue_score']}점",
             "임시 Value",
             "#3d7ee8",
-            "◉"
+            "◉",
+            card_size="small"
         )
     with f6:
     
@@ -1822,7 +2188,8 @@ with tab_fatigue:
             fatigue_summary["normal_time_text"],
             "",
             "#3d7ee8",
-            "✓"
+            "✓",
+            card_size="small"
         )
     with f7:
         render_metric_card(
@@ -1831,7 +2198,8 @@ with tab_fatigue:
             # f"비율 {format_percent_from_ratio(fatigue_summary['drowsy_ratio'])}",
             "",
             "#8b5cf6",
-            "◔"
+            "◔",
+            card_size="small"
         )
     # with f7:
     #     render_metric_card(
@@ -1948,7 +2316,7 @@ with tab_fatigue:
         #             {"col": "avg_eye_closed_ratio", "name": "눈 감김 비율", "color": "#6366f1"},
         #             {"col": "avg_mouth_open_ratio", "name": "입 벌림 비율", "color": "#f97316"},
         #         ],
-        #         title=f"{fatigue_time_unit_min}분 단위 눈 감김 / 입 벌림 최고값",
+        #         title=f"{fatigue_time_unit_min}분 단위 눈 감김 / 입 벌림 최고값", 
         #         unit_min=fatigue_time_unit_min
         #     )
 
