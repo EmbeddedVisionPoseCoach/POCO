@@ -9,6 +9,11 @@ class AlarmSettings:
     bad_posture_duration_sec: int = 5
     fatigue_duration_sec: int = 5
     repeat_alarm_sec: int = 10
+    posture_Hardware_count: int = 5
+    fatigue_Hardware_count: int = 3
+    posture_Strong_limit: int = 3
+    fatigue_Strong_limit: int = 2
+    strong_alert_cooldown_min: int = 5
 
     def to_dict(self):
         return asdict(self)
@@ -43,6 +48,37 @@ class AlarmSettings:
                 min_value=1,
                 max_value=600,
                 default_value=default.repeat_alarm_sec
+            ),
+            ## 추가
+            posture_Hardware_count=cls._clamp_int(
+                data.get("posture_Hardware_count", default.posture_Hardware_count),
+                min_value=1,
+                max_value=30,
+                default_value=default.posture_Hardware_count
+            ),
+            fatigue_Hardware_count=cls._clamp_int(
+                data.get("fatigue_Hardware_count", default.fatigue_Hardware_count),
+                min_value=1,
+                max_value=30,
+                default_value=default.fatigue_Hardware_count
+            ),
+            posture_Strong_limit=cls._clamp_int(
+                data.get("posture_Strong_limit", default.posture_Strong_limit),
+                min_value=1,
+                max_value=30,
+                default_value=default.posture_Strong_limit
+            ),
+            fatigue_Strong_limit=cls._clamp_int(
+                data.get("fatigue_Strong_limit", default.fatigue_Strong_limit),
+                min_value=1,
+                max_value=30,
+                default_value=default.fatigue_Strong_limit
+            ),
+            strong_alert_cooldown_min=cls._clamp_int(
+                data.get("strong_alert_cooldown_min", default.strong_alert_cooldown_min),
+                min_value=1,
+                max_value=120,
+                default_value=default.strong_alert_cooldown_min
             ),
         )
 

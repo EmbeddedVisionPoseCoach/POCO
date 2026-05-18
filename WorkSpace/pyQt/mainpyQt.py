@@ -426,6 +426,41 @@ class MainWindow(QMainWindow):
             settings.repeat_alarm_sec
         )
 
+        ## 추가
+        # posture_Hardware_count 자세 LED/부저 반복 횟수
+        self.set_spinbox_value(
+            "spinPostureAlertCount",
+            settings.posture_Hardware_count
+        )
+
+        # fatigue_Hardware_count 졸음 LED/부저 반복 횟수
+        self.set_spinbox_value(
+            "spinDrowsyAlertCount",
+            settings.fatigue_Hardware_count
+        )
+
+        # posture_Strong_limit 자세 강함 알림 횟수
+        self.set_spinbox_value(
+            "spinPostureStrongLimit",
+            settings.posture_Strong_limit
+        )
+
+        # fatigue_Strong_limit 졸음 강함 알림 횟수
+        self.set_spinbox_value(
+            "spinDrowsyStrongLimit",
+            settings.fatigue_Strong_limit
+        )
+
+
+        # strong_alert_cooldown_min 강한 알림 후 쿨타임
+        self.set_spinbox_value(
+            "spinStrongAlertCooldownMin",
+            settings.strong_alert_cooldown_min
+        )
+
+
+
+
 
     def collect_settings_from_ui(self):
         """
@@ -450,7 +485,28 @@ class MainWindow(QMainWindow):
             repeat_alarm_sec=self.get_spinbox_value(
                 "spinRepeatAlarmSec",
                 default_value=10
-            )
+            ),
+            ## 추가
+            posture_Hardware_count=self.get_spinbox_value(
+                "spinPostureAlertCount",
+                default_value=5
+            ),
+            fatigue_Hardware_count=self.get_spinbox_value(
+                "spinDrowsyAlertCount",
+                default_value=3
+            ),
+            posture_Strong_limit=self.get_spinbox_value(
+                "spinPostureStrongLimit",
+                default_value=3
+            ),
+            fatigue_Strong_limit=self.get_spinbox_value(
+                "spinDrowsyStrongLimit",
+                default_value=2
+            ),
+            strong_alert_cooldown_min=self.get_spinbox_value(
+                "spinStrongAlertCooldownMin",
+                default_value=5
+            ),
         )
 
 
@@ -482,7 +538,12 @@ class MainWindow(QMainWindow):
         spinbox_names = [
             "spinBadPostureDurationSec",
             "spinFatigueDurationSec",
-            "spinRepeatAlarmSec"
+            "spinRepeatAlarmSec",
+            "spinPostureAlertCount",
+            "spinDrowsyAlertCount",
+            "spinPostureStrongLimit",
+            "spinDrowsyStrongLimit",
+            "spinStrongAlertCooldownMin"
         ]
 
         for object_name in spinbox_names:

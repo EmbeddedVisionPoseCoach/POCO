@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>840</width>
-    <height>481</height>
+    <width>800</width>
+    <height>480</height>
    </rect>
   </property>
   <property name="minimumSize">
@@ -701,8 +701,8 @@ QLabel#settingsHelpText {
             <rect>
              <x>0</x>
              <y>0</y>
-             <width>781</width>
-             <height>438</height>
+             <width>778</width>
+             <height>432</height>
             </rect>
            </property>
            <layout class="QHBoxLayout" name="settingsContentLayout" stretch="3,2">
@@ -748,7 +748,7 @@ QLabel#settingsHelpText {
                <item>
                 <widget class="QLabel" name="settingsTitle">
                  <property name="text">
-                  <string>하드웨어 알림 설정</string>
+                  <string>카메라 알림 설정</string>
                  </property>
                 </widget>
                </item>
@@ -776,22 +776,6 @@ QLabel#settingsHelpText {
                  <property name="verticalSpacing">
                   <number>8</number>
                  </property>
-                 <item row="0" column="1">
-                  <widget class="QSpinBox" name="spinBadPostureDurationSec">
-                   <property name="suffix">
-                    <string> 초</string>
-                   </property>
-                   <property name="minimum">
-                    <number>1</number>
-                   </property>
-                   <property name="maximum">
-                    <number>300</number>
-                   </property>
-                   <property name="value">
-                    <number>5</number>
-                   </property>
-                  </widget>
-                 </item>
                  <item row="1" column="1">
                   <widget class="QSpinBox" name="spinFatigueDurationSec">
                    <property name="suffix">
@@ -808,108 +792,10 @@ QLabel#settingsHelpText {
                    </property>
                   </widget>
                  </item>
-                 <item row="7" column="0">
-                  <widget class="QLabel" name="labelStrongCooldownTitle">
-                   <property name="text">
-                    <string>강한 알림 후 쿨타임</string>
-                   </property>
-                   <property name="alignment">
-                    <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignVCenter</set>
-                   </property>
-                  </widget>
-                 </item>
-                 <item row="6" column="1">
-                  <widget class="QSpinBox" name="spinDrowsyStrongLimit">
-                   <property name="suffix">
-                    <string> 회</string>
-                   </property>
-                   <property name="minimum">
-                    <number>1</number>
-                   </property>
-                   <property name="maximum">
-                    <number>20</number>
-                   </property>
-                   <property name="value">
-                    <number>2</number>
-                   </property>
-                  </widget>
-                 </item>
-                 <item row="3" column="1">
-                  <widget class="QSpinBox" name="spinPostureAlertCount">
-                   <property name="suffix">
-                    <string> 회</string>
-                   </property>
-                   <property name="minimum">
-                    <number>1</number>
-                   </property>
-                   <property name="maximum">
-                    <number>20</number>
-                   </property>
-                   <property name="value">
-                    <number>5</number>
-                   </property>
-                  </widget>
-                 </item>
-                 <item row="3" column="0">
-                  <widget class="QLabel" name="labelPostureAlertCountTitle">
-                   <property name="text">
-                    <string>자세 LED/부저 반복횟수</string>
-                   </property>
-                   <property name="alignment">
-                    <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignVCenter</set>
-                   </property>
-                  </widget>
-                 </item>
-                 <item row="7" column="1">
-                  <widget class="QSpinBox" name="spinStrongAlertCooldownMin">
-                   <property name="suffix">
-                    <string> 분</string>
-                   </property>
-                   <property name="minimum">
-                    <number>1</number>
-                   </property>
-                   <property name="maximum">
-                    <number>60</number>
-                   </property>
-                   <property name="value">
-                    <number>5</number>
-                   </property>
-                  </widget>
-                 </item>
                  <item row="2" column="0">
                   <widget class="QLabel" name="labelRepeatAlarmTitle">
                    <property name="text">
-                    <string>알람 반복 간격</string>
-                   </property>
-                   <property name="alignment">
-                    <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignVCenter</set>
-                   </property>
-                  </widget>
-                 </item>
-                 <item row="5" column="0">
-                  <widget class="QLabel" name="labelPostureStrongLimitTitle">
-                   <property name="text">
-                    <string>자세 강한 알림 횟수</string>
-                   </property>
-                   <property name="alignment">
-                    <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignVCenter</set>
-                   </property>
-                  </widget>
-                 </item>
-                 <item row="6" column="0">
-                  <widget class="QLabel" name="labelDrowsyStrongLimitTitle">
-                   <property name="text">
-                    <string>졸음 강한 알림 횟수</string>
-                   </property>
-                   <property name="alignment">
-                    <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignVCenter</set>
-                   </property>
-                  </widget>
-                 </item>
-                 <item row="1" column="0">
-                  <widget class="QLabel" name="labelFatigueDurationTitle">
-                   <property name="text">
-                    <string>피로 상태 지속 기준</string>
+                    <string>반복 알림 간격</string>
                    </property>
                    <property name="alignment">
                     <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignVCenter</set>
@@ -932,52 +818,36 @@ QLabel#settingsHelpText {
                    </property>
                   </widget>
                  </item>
-                 <item row="0" column="0">
-                  <widget class="QLabel" name="labelBadPostureDurationTitle">
+                 <item row="1" column="0">
+                  <widget class="QLabel" name="labelFatigueDurationTitle">
                    <property name="text">
-                    <string>나쁜 자세 지속 기준</string>
+                    <string>피로 상태 지속 기준</string>
                    </property>
                    <property name="alignment">
                     <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignVCenter</set>
                    </property>
                   </widget>
                  </item>
-                 <item row="5" column="1">
-                  <widget class="QSpinBox" name="spinPostureStrongLimit">
+                 <item row="0" column="1">
+                  <widget class="QSpinBox" name="spinBadPostureDurationSec">
                    <property name="suffix">
-                    <string> 회</string>
+                    <string> 초</string>
                    </property>
                    <property name="minimum">
                     <number>1</number>
                    </property>
                    <property name="maximum">
-                    <number>20</number>
+                    <number>300</number>
                    </property>
                    <property name="value">
-                    <number>3</number>
+                    <number>5</number>
                    </property>
                   </widget>
                  </item>
-                 <item row="4" column="1">
-                  <widget class="QSpinBox" name="spinDrowsyAlertCount">
-                   <property name="suffix">
-                    <string> 회</string>
-                   </property>
-                   <property name="minimum">
-                    <number>1</number>
-                   </property>
-                   <property name="maximum">
-                    <number>20</number>
-                   </property>
-                   <property name="value">
-                    <number>3</number>
-                   </property>
-                  </widget>
-                 </item>
-                 <item row="4" column="0">
-                  <widget class="QLabel" name="labelDrowsyAlertCountTitle">
+                 <item row="0" column="0">
+                  <widget class="QLabel" name="labelBadPostureDurationTitle">
                    <property name="text">
-                    <string>졸음 LED/부저 반복횟수</string>
+                    <string>나쁜 자세 지속 기준</string>
                    </property>
                    <property name="alignment">
                     <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignVCenter</set>
@@ -998,6 +868,19 @@ QLabel#settingsHelpText {
                   </size>
                  </property>
                 </spacer>
+               </item>
+               <item>
+                <widget class="QPushButton" name="btnSaveSettings">
+                 <property name="minimumSize">
+                  <size>
+                   <width>0</width>
+                   <height>34</height>
+                  </size>
+                 </property>
+                 <property name="text">
+                  <string>설정 저장</string>
+                 </property>
+                </widget>
                </item>
               </layout>
              </widget>
@@ -1030,7 +913,11 @@ QLabel#settingsHelpText {
                <item>
                 <widget class="QLabel" name="settingsHelpText">
                  <property name="text">
-                  <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;나쁜 자세 또는 졸음 상태가 설정한 지속 기준 이상 유지되면 일반 LED/부저 알림이 울립니다.&lt;/p&gt;&lt;p&gt;일반 알림이 울린 뒤에도 같은 상태가 계속 유지되면, 설정한 알림 반복 간격마다 다시 알림이 발생합니다.&lt;/p&gt;&lt;p&gt;자세와 졸음의 LED/부저 반복 횟수는 각각 따로 설정할 수 있습니다.&lt;/p&gt;&lt;p&gt;&lt;br/&gt;같은 종류의 알림이 연속으로 설정한 다시 알림 횟수만큼 발생하면 강한 알림이 울립니다.&lt;/p&gt;&lt;p&gt;강한 알림이 울린 뒤에는 해당 알림만 쿨타임 동안 중단됩니다.&lt;/p&gt;&lt;p&gt;중간에 다른 자세나 다른 상태가 감지되면 강한 알림 카운트는 초기화됩니다.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                  <string>나쁜 자세나 피로 상태가 설정한 시간 이상 유지되면 알림이 울립니다.
+
+같은 상태가 계속 유지되는 경우 반복 알림 간격마다 다시 알림을 보냅니다.
+
+알림 사용을 끄면 하드웨어 알림을 호출하지 않도록 연결하면 됩니다.</string>
                  </property>
                  <property name="alignment">
                   <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignTop</set>
@@ -1048,23 +935,10 @@ QLabel#settingsHelpText {
                  <property name="sizeHint" stdset="0">
                   <size>
                    <width>20</width>
-                   <height>20</height>
+                   <height>40</height>
                   </size>
                  </property>
                 </spacer>
-               </item>
-               <item>
-                <widget class="QPushButton" name="btnSaveSettings">
-                 <property name="minimumSize">
-                  <size>
-                   <width>0</width>
-                   <height>34</height>
-                  </size>
-                 </property>
-                 <property name="text">
-                  <string>설정 저장</string>
-                 </property>
-                </widget>
                </item>
               </layout>
              </widget>
