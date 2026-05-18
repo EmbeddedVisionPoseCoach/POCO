@@ -198,6 +198,7 @@ class GruInferenceService:
         safe_pose_features = list(safe_pose_features)
         
         # safe_face_features = np.array(safe_face_features)- self.base_line
+        # safe_face_features = list(safe_face_features)
 
 
         self.pose_window.append(safe_pose_features)
@@ -212,9 +213,8 @@ class GruInferenceService:
                 # print(f"pose_window : {self.pose_window.__len__()}")
 
                 posture_type, posture_confidence = self.predict_pose()
-
-                # fatigue_label, fatigue_probability = self.predict_face()
-                fatigue_label, fatigue_probability = "Normal", 0.0
+                fatigue_label, fatigue_probability = self.predict_face()
+                # fatigue_label, fatigue_probability = "Normal", 0.0
 
             except Exception as e:
                 return InferenceResult(
@@ -408,6 +408,7 @@ class GruInferenceService:
         )
 
         label_index, confidence = self.parse_output(output)
+        
         label = self.face_labels.get(label_index, f"Unknown({label_index})")
 
         # print(f"face_Confidence : {confidence}")
