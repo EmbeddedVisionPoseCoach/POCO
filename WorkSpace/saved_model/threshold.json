@@ -1,0 +1,4 @@
+{
+    "threshold": 0.7700000000000002,
+    "description": "If drowsy_probability >= threshold, label is Drowsy."
+}

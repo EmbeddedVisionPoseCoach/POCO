@@ -1,0 +1,11 @@
+{
+    "alarm_enabled": true,
+    "bad_posture_duration_sec": 5,
+    "fatigue_duration_sec": 5,
+    "repeat_alarm_sec": 10,
+    "posture_Hardware_count": 5,
+    "fatigue_Hardware_count": 3,
+    "posture_Strong_limit": 3,
+    "fatigue_Strong_limit": 2,
+    "strong_alert_cooldown_min": 5
+}
