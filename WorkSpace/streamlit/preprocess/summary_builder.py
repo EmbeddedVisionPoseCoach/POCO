@@ -9,25 +9,41 @@ import pandas as pd
 # ------------------------------------------------------------
 
 try:
-    from workspace.preprocess.data_loader import load_posture_log
+    from preprocess.data_loader import load_posture_log
 except ModuleNotFoundError:
     try:
         from .data_loader import load_posture_log
     except ImportError:
         from data_loader import load_posture_log
 
+
 try:
     from .domain_schema import (
         GOOD_POSTURE_LABEL,
         DROWSY_LABEL,
         NORMAL_FATIGUE_LABEL,
+        POSTURE_FORWARD_HEAD,
+        POSTURE_CHIN_PROPPING,
+        POSTURE_ASYMMETRIC,
     )
 except ImportError:
-    from domain_schema import (
-        GOOD_POSTURE_LABEL,
-        DROWSY_LABEL,
-        NORMAL_FATIGUE_LABEL,
-    )
+    try:
+        from domain_schema import (
+            GOOD_POSTURE_LABEL,
+            DROWSY_LABEL,
+            NORMAL_FATIGUE_LABEL,
+            POSTURE_FORWARD_HEAD,
+            POSTURE_CHIN_PROPPING,
+            POSTURE_ASYMMETRIC,
+        )
+    except ImportError:
+        # domain_schema import가 실패해도 테스트가 가능하도록 최소 fallback
+        GOOD_POSTURE_LABEL = "Optimal"
+        DROWSY_LABEL = "Drowsy"
+        NORMAL_FATIGUE_LABEL = "Normal"
+        POSTURE_FORWARD_HEAD = "ForwardHead"
+        POSTURE_CHIN_PROPPING = "ChinPropping"
+        POSTURE_ASYMMETRIC = "Asymmetric"
 
 
 # ------------------------------------------------------------
@@ -38,10 +54,48 @@ except ImportError:
 LOG_INTERVAL_SEC = 1
 SESSION_GAP_THRESHOLD_SEC = 5
 
-# 현재는 실제 점수 컬럼이 없으므로 임시 리터럴 값 사용
-# 나중에 CSV에 posture_score, fatigue_score가 들어오면 자동으로 실제 평균값 사용
-PLACEHOLDER_POSTURE_SCORE = 82
-PLACEHOLDER_FATIGUE_SCORE = 76
+# 정자세 라벨 호환 처리
+# 프로젝트 중간에 Good / Optimal이 섞여도 같은 정자세로 처리한다.
+GOOD_POSTURE_ALIASES = {
+    str(GOOD_POSTURE_LABEL),
+    "Good",
+    "Optimal",
+}
+
+# 계산에서 제외할 비정상 라벨
+INVALID_LABELS = {
+    "",
+    "-",
+    "None",
+    "nan",
+    "NaN",
+    "Unknown",
+}
+
+# 자세 감점 가중치
+# 점수 계산식:
+# posture_score = 100 - sum(나쁜 자세 비율 * 자세별 가중치 * 100)
+POSTURE_PENALTY_WEIGHTS = {
+    str(POSTURE_FORWARD_HEAD): 0.8,
+    "ForwardHead": 0.8,
+    "Forward Head": 0.8,
+
+    str(POSTURE_CHIN_PROPPING): 1.0,
+    "ChinPropping": 1.0,
+    "ChinRest": 1.0,
+    "Chin Propping": 1.0,
+    "Chin Rest": 1.0,
+
+    str(POSTURE_ASYMMETRIC): 0.9,
+    "Asymmetric": 0.9,
+    "Asymmetry": 0.9,
+    "ShoulderImbalance": 0.9,
+    "Shoulder Imbalance": 0.9,
+}
+
+# 혹시 새로운 나쁜 자세 라벨이 추가됐는데
+# 가중치를 아직 등록하지 않았을 때 사용할 기본 감점
+DEFAULT_BAD_POSTURE_WEIGHT = 0.8
 
 
 # ------------------------------------------------------------
@@ -54,6 +108,16 @@ def get_now_string() -> str:
     report_summary 생성 시간을 기록할 때 사용한다.
     """
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def clamp_score(score: float) -> float:
+    """
+    점수를 0~100 사이로 제한한다.
+    """
+    if score is None:
+        return 0.0
+
+    return max(0.0, min(100.0, float(score)))
 
 
 def safe_round(value: Any, digit: int = 4) -> Optional[float]:
@@ -75,10 +139,10 @@ def safe_ratio(part: float, total: float, digit: int = 4) -> float:
     비율을 안전하게 계산한다.
     total이 0이면 0을 반환한다.
     """
-    if total == 0:
+    if total <= 0:
         return 0.0
 
-    return round(part / total, digit)
+    return round(float(part) / float(total), digit)
 
 
 def seconds_to_text(seconds: int) -> str:
@@ -115,65 +179,6 @@ def get_numeric_series(df: pd.DataFrame, column: str) -> pd.Series:
     return pd.to_numeric(df[column], errors="coerce").dropna()
 
 
-def get_most_common_issue(
-    seconds_dict: Dict[str, int],
-    exclude_labels: Optional[List[str]] = None
-) -> Optional[str]:
-    """
-    특정 라벨을 제외하고 가장 많이 등장한 라벨을 반환한다.
-
-    예:
-    posture_type_seconds에서 좋은 자세 라벨을 제외하고
-    가장 많이 나온 자세 문제를 찾을 때 사용한다.
-    """
-    if exclude_labels is None:
-        exclude_labels = []
-
-    filtered = {
-        label: seconds
-        for label, seconds in seconds_dict.items()
-        if label not in exclude_labels and seconds > 0
-    }
-
-    if not filtered:
-        return None
-
-    return max(filtered, key=filtered.get)
-
-
-def build_top_items(
-    seconds_dict: Dict[str, int],
-    total_sec: int,
-    exclude_labels: Optional[List[str]] = None,
-    top_n: int = 3
-) -> List[Dict[str, Any]]:
-    """
-    누적 시간이 많은 라벨 TOP N을 만든다.
-    """
-    if exclude_labels is None:
-        exclude_labels = []
-
-    items = []
-
-    for label, seconds in seconds_dict.items():
-        if label in exclude_labels:
-            continue
-
-        if seconds <= 0:
-            continue
-
-        items.append({
-            "label": label,
-            "seconds": int(seconds),
-            "time_text": seconds_to_text(int(seconds)),
-            "ratio": safe_ratio(seconds, total_sec)
-        })
-
-    items.sort(key=lambda item: item["seconds"], reverse=True)
-
-    return items[:top_n]
-
-
 def safe_mean_column(df: pd.DataFrame, column: str, default: float = 0.0, digit: int = 4) -> float:
     if column not in df.columns:
         return default
@@ -206,6 +211,229 @@ def safe_sum_column(df: pd.DataFrame, column: str, default: int = 0) -> int:
 
     return int(series.sum())
 
+
+def normalize_label(label: Any) -> str:
+    """
+    라벨 값을 안전한 문자열로 변환한다.
+    """
+    if label is None:
+        return ""
+
+    return str(label).strip()
+
+
+def is_invalid_label(label: Any) -> bool:
+    return normalize_label(label) in INVALID_LABELS
+
+
+def is_good_posture_label(label: Any) -> bool:
+    return normalize_label(label) in GOOD_POSTURE_ALIASES
+
+
+def is_drowsy_label(label: Any) -> bool:
+    return normalize_label(label) in {str(DROWSY_LABEL), "Drowsy"}
+
+
+def count_seconds_by_label(df: pd.DataFrame, column: str) -> Dict[str, int]:
+    """
+    특정 라벨 컬럼의 등장 횟수를 초 단위로 변환한다.
+    현재는 1row = 1초 기준이다.
+    """
+    if column not in df.columns:
+        return {}
+
+    counts = df[column].apply(normalize_label).value_counts().to_dict()
+
+    return {
+        str(label): int(count * LOG_INTERVAL_SEC)
+        for label, count in counts.items()
+        if not is_invalid_label(label)
+    }
+
+
+def sum_seconds_by_labels(seconds_dict: Dict[str, int], labels: set[str]) -> int:
+    total = 0
+
+    for label, seconds in seconds_dict.items():
+        if normalize_label(label) in labels:
+            total += int(seconds)
+
+    return total
+
+
+def get_most_common_issue(
+    seconds_dict: Dict[str, int],
+    exclude_labels: Optional[List[str]] = None
+) -> Optional[str]:
+    """
+    특정 라벨을 제외하고 가장 많이 등장한 라벨을 반환한다.
+
+    예:
+    posture_type_seconds에서 좋은 자세 라벨을 제외하고
+    가장 많이 나온 자세 문제를 찾을 때 사용한다.
+    """
+    if exclude_labels is None:
+        exclude_labels = []
+
+    exclude_set = {normalize_label(label) for label in exclude_labels}
+
+    filtered = {
+        label: seconds
+        for label, seconds in seconds_dict.items()
+        if normalize_label(label) not in exclude_set
+        and not is_good_posture_label(label)
+        and not is_invalid_label(label)
+        and seconds > 0
+    }
+
+    if not filtered:
+        return None
+
+    return max(filtered, key=filtered.get)
+
+
+def build_top_items(
+    seconds_dict: Dict[str, int],
+    total_sec: int,
+    exclude_labels: Optional[List[str]] = None,
+    top_n: int = 3
+) -> List[Dict[str, Any]]:
+    """
+    누적 시간이 많은 라벨 TOP N을 만든다.
+    """
+    if exclude_labels is None:
+        exclude_labels = []
+
+    exclude_set = {normalize_label(label) for label in exclude_labels}
+
+    items = []
+
+    for label, seconds in seconds_dict.items():
+        label_text = normalize_label(label)
+
+        if label_text in exclude_set:
+            continue
+
+        if is_good_posture_label(label_text):
+            continue
+
+        if is_invalid_label(label_text):
+            continue
+
+        if seconds <= 0:
+            continue
+
+        items.append({
+            "label": label_text,
+            "seconds": int(seconds),
+            "time_text": seconds_to_text(int(seconds)),
+            "ratio": safe_ratio(seconds, total_sec)
+        })
+
+    items.sort(key=lambda item: item["seconds"], reverse=True)
+
+    return items[:top_n]
+
+
+# ------------------------------------------------------------
+# 점수 계산
+# ------------------------------------------------------------
+
+def calculate_posture_score(posture_type_seconds: Dict[str, int], total_logged_sec: int) -> float:
+    """
+    자세 점수 계산.
+
+    기본 철학:
+    - 정자세는 감점 없음
+    - 나쁜 자세는 누적 비율에 따라 감점
+    - 자세 유형별로 감점 가중치를 다르게 적용
+
+    예:
+    ForwardHead 20%, weight 0.8 -> 16점 감점
+    ChinPropping 10%, weight 1.0 -> 10점 감점
+    """
+
+    if total_logged_sec <= 0:
+        return 0.0
+
+    penalty = 0.0
+
+    for label, seconds in posture_type_seconds.items():
+        label_text = normalize_label(label)
+
+        if is_invalid_label(label_text):
+            continue
+
+        if is_good_posture_label(label_text):
+            continue
+
+        weight = POSTURE_PENALTY_WEIGHTS.get(label_text, DEFAULT_BAD_POSTURE_WEIGHT)
+        ratio = int(seconds) / total_logged_sec
+
+        penalty += ratio * weight * 100
+
+    score = 100 - penalty
+
+    return round(clamp_score(score), 1)
+
+
+def calculate_fatigue_score(fatigue_label_seconds: Dict[str, int], total_logged_sec: int) -> float:
+    """
+    피로도 점수 계산.
+
+    현재 피로도 라벨은 Normal / Drowsy 두 단계이므로
+    Drowsy 누적 비율만큼 감점한다.
+
+    fatigue_score = 100 - drowsy_ratio * 100
+    """
+
+    if total_logged_sec <= 0:
+        return 0.0
+
+    drowsy_sec = 0
+
+    for label, seconds in fatigue_label_seconds.items():
+        if is_drowsy_label(label):
+            drowsy_sec += int(seconds)
+
+    drowsy_ratio = drowsy_sec / total_logged_sec
+    score = 100 - (drowsy_ratio * 100)
+
+    return round(clamp_score(score), 1)
+
+
+def get_posture_grade(score: float) -> str:
+    if score >= 90:
+        return "매우 좋음"
+
+    if score >= 80:
+        return "좋음"
+
+    if score >= 70:
+        return "주의"
+
+    if score >= 60:
+        return "나쁨"
+
+    return "매우 나쁨"
+
+
+def get_fatigue_grade(score: float) -> str:
+    if score >= 90:
+        return "매우 안정"
+
+    if score >= 80:
+        return "양호"
+
+    if score >= 70:
+        return "주의"
+
+    if score >= 60:
+        return "피로 누적"
+
+    return "휴식 필요"
+
+
 # ------------------------------------------------------------
 # 점수 요약
 # ------------------------------------------------------------
@@ -214,9 +442,14 @@ def build_score_summary(df: pd.DataFrame) -> Dict[str, Any]:
     """
     점수 상세 탭에서 사용할 자세 점수 / 피로도 점수 요약을 만든다.
 
-    현재는 posture_score, fatigue_score 컬럼이 없으므로 placeholder 값을 사용한다.
-    나중에 CSV에 posture_score, fatigue_score 컬럼이 추가되면 자동으로 실제 값을 사용한다.
+    CSV에 posture_score / fatigue_score 컬럼이 있으면 실제 평균값을 사용하고,
+    없으면 posture_type / fatigue_label 누적 비율 기반으로 계산한다.
     """
+
+    total_logged_sec = len(df) * LOG_INTERVAL_SEC
+
+    posture_type_seconds = count_seconds_by_label(df, "posture_type")
+    fatigue_label_seconds = count_seconds_by_label(df, "fatigue_label")
 
     posture_scores = get_numeric_series(df, "posture_score")
 
@@ -226,10 +459,10 @@ def build_score_summary(df: pd.DataFrame) -> Dict[str, Any]:
         min_posture_score = safe_round(posture_scores.min(), digit=1)
         posture_score_source = "log"
     else:
-        posture_score = PLACEHOLDER_POSTURE_SCORE
-        max_posture_score = PLACEHOLDER_POSTURE_SCORE
-        min_posture_score = PLACEHOLDER_POSTURE_SCORE
-        posture_score_source = "placeholder"
+        posture_score = calculate_posture_score(posture_type_seconds, total_logged_sec)
+        max_posture_score = posture_score
+        min_posture_score = posture_score
+        posture_score_source = "calculated"
 
     fatigue_scores = get_numeric_series(df, "fatigue_score")
 
@@ -239,21 +472,23 @@ def build_score_summary(df: pd.DataFrame) -> Dict[str, Any]:
         min_fatigue_score = safe_round(fatigue_scores.min(), digit=1)
         fatigue_score_source = "log"
     else:
-        fatigue_score = PLACEHOLDER_FATIGUE_SCORE
-        max_fatigue_score = PLACEHOLDER_FATIGUE_SCORE
-        min_fatigue_score = PLACEHOLDER_FATIGUE_SCORE
-        fatigue_score_source = "placeholder"
+        fatigue_score = calculate_fatigue_score(fatigue_label_seconds, total_logged_sec)
+        max_fatigue_score = fatigue_score
+        min_fatigue_score = fatigue_score
+        fatigue_score_source = "calculated"
 
     return {
         "posture_score": posture_score,
         "max_posture_score": max_posture_score,
         "min_posture_score": min_posture_score,
         "posture_score_source": posture_score_source,
+        "posture_grade": get_posture_grade(posture_score),
 
         "fatigue_score": fatigue_score,
         "max_fatigue_score": max_fatigue_score,
         "min_fatigue_score": min_fatigue_score,
-        "fatigue_score_source": fatigue_score_source
+        "fatigue_score_source": fatigue_score_source,
+        "fatigue_grade": get_fatigue_grade(fatigue_score),
     }
 
 
@@ -273,31 +508,55 @@ def build_posture_summary(df: pd.DataFrame) -> Dict[str, Any]:
     - 자세별 누적 시간
     - 가장 많이 나온 문제 자세
     - TOP 3 자세 문제
-    - 자세 feature 평균/최대값
+    - 자세 점수
     """
 
     total_logged_sec = len(df) * LOG_INTERVAL_SEC
 
-    posture_counts = df["posture_type"].value_counts().to_dict()
+    posture_type_seconds = count_seconds_by_label(df, "posture_type")
 
-    posture_type_seconds = {
-        posture_type: int(count * LOG_INTERVAL_SEC)
-        for posture_type, count in posture_counts.items()
-    }
+    good_sec = sum(
+        seconds
+        for label, seconds in posture_type_seconds.items()
+        if is_good_posture_label(label)
+    )
 
-    good_sec = posture_type_seconds.get(GOOD_POSTURE_LABEL, 0)
-    bad_sec = max(total_logged_sec - good_sec, 0)
+    bad_sec = sum(
+        seconds
+        for label, seconds in posture_type_seconds.items()
+        if not is_good_posture_label(label)
+        and not is_invalid_label(label)
+    )
+
+    # 혹시 bad_sec 계산이 전체 로그보다 커지는 이상 상황 방어
+    bad_sec = min(int(bad_sec), int(total_logged_sec))
+    good_sec = min(int(good_sec), int(total_logged_sec))
 
     most_common_posture = get_most_common_issue(
         seconds_dict=posture_type_seconds,
-        exclude_labels=[GOOD_POSTURE_LABEL]
+        exclude_labels=list(GOOD_POSTURE_ALIASES)
     )
 
     top_posture_issues = build_top_items(
         seconds_dict=posture_type_seconds,
         total_sec=total_logged_sec,
-        exclude_labels=[GOOD_POSTURE_LABEL],
+        exclude_labels=list(GOOD_POSTURE_ALIASES),
         top_n=3
+    )
+
+    posture_score = calculate_posture_score(posture_type_seconds, total_logged_sec)
+
+    forward_head_sec = sum_seconds_by_labels(
+        posture_type_seconds,
+        {str(POSTURE_FORWARD_HEAD), "ForwardHead", "Forward Head"}
+    )
+    chin_propping_sec = sum_seconds_by_labels(
+        posture_type_seconds,
+        {str(POSTURE_CHIN_PROPPING), "ChinPropping", "ChinRest", "Chin Propping", "Chin Rest"}
+    )
+    asymmetric_sec = sum_seconds_by_labels(
+        posture_type_seconds,
+        {str(POSTURE_ASYMMETRIC), "Asymmetric", "Asymmetry", "ShoulderImbalance", "Shoulder Imbalance"}
     )
 
     return {
@@ -310,12 +569,27 @@ def build_posture_summary(df: pd.DataFrame) -> Dict[str, Any]:
         "good_ratio": safe_ratio(good_sec, total_logged_sec),
         "bad_ratio": safe_ratio(bad_sec, total_logged_sec),
 
+        "posture_score": posture_score,
+        "posture_grade": get_posture_grade(posture_score),
+
         "most_common_posture": most_common_posture,
 
         "posture_type_seconds": posture_type_seconds,
         "top_posture_issues": top_posture_issues,
 
-        "metric_summary": {}
+        "metric_summary": {
+            "forward_head_sec": int(forward_head_sec),
+            "forward_head_time_text": seconds_to_text(forward_head_sec),
+            "forward_head_ratio": safe_ratio(forward_head_sec, total_logged_sec),
+
+            "chin_propping_sec": int(chin_propping_sec),
+            "chin_propping_time_text": seconds_to_text(chin_propping_sec),
+            "chin_propping_ratio": safe_ratio(chin_propping_sec, total_logged_sec),
+
+            "asymmetric_sec": int(asymmetric_sec),
+            "asymmetric_time_text": seconds_to_text(asymmetric_sec),
+            "asymmetric_ratio": safe_ratio(asymmetric_sec, total_logged_sec),
+        }
     }
 
 
@@ -327,38 +601,48 @@ def build_fatigue_summary(df: pd.DataFrame) -> Dict[str, Any]:
     """
     피로도 관련 요약 데이터를 만든다.
 
-    새 스펙 기준:
-    - fatigue_label
+    현재 스펙:
+    - fatigue_label: Normal / Drowsy
     - fatigue_probability
     """
 
     total_logged_sec = len(df) * LOG_INTERVAL_SEC
 
-    fatigue_counts = df["fatigue_label"].value_counts().to_dict()
+    fatigue_label_seconds = count_seconds_by_label(df, "fatigue_label")
 
-    fatigue_label_seconds = {
-        fatigue_label: int(count * LOG_INTERVAL_SEC)
-        for fatigue_label, count in fatigue_counts.items()
-    }
+    normal_sec = 0
+    drowsy_sec = 0
 
-    normal_sec = fatigue_label_seconds.get(NORMAL_FATIGUE_LABEL, 0)
-    drowsy_sec = fatigue_label_seconds.get(DROWSY_LABEL, 0)
+    for label, seconds in fatigue_label_seconds.items():
+        if is_drowsy_label(label):
+            drowsy_sec += int(seconds)
+        elif normalize_label(label) == str(NORMAL_FATIGUE_LABEL):
+            normal_sec += int(seconds)
+
+    # Normal이 누락되어 있고 Drowsy만 있는 경우를 대비
+    if normal_sec + drowsy_sec < total_logged_sec:
+        normal_sec += max(total_logged_sec - normal_sec - drowsy_sec, 0)
 
     avg_fatigue_probability = safe_mean_column(df, "fatigue_probability", default=0.0)
     max_fatigue_probability = safe_max_column(df, "fatigue_probability", default=0.0)
 
+    fatigue_score = calculate_fatigue_score(fatigue_label_seconds, total_logged_sec)
+
     return {
         "normal_sec": int(normal_sec),
         "normal_time_text": seconds_to_text(normal_sec),
+        "normal_ratio": safe_ratio(normal_sec, total_logged_sec),
 
         "drowsy_sec": int(drowsy_sec),
         "drowsy_time_text": seconds_to_text(drowsy_sec),
-
         "drowsy_ratio": safe_ratio(drowsy_sec, total_logged_sec),
+
+        "fatigue_score": fatigue_score,
+        "fatigue_grade": get_fatigue_grade(fatigue_score),
 
         "fatigue_label_seconds": fatigue_label_seconds,
 
-        # 새 스펙에서는 하품/눈감김/입벌림 데이터가 없으므로 기본값
+        # 현재 스펙에서는 하품/눈감김/입벌림 데이터가 없으므로 기본값
         "total_yawn_count": 0,
         "yawn_detected_sec": 0,
         "yawn_detected_time_text": "0초",
@@ -421,10 +705,26 @@ def build_minute_summary(df: pd.DataFrame) -> List[Dict[str, Any]]:
     for (segment_index, minute_index), group in grouped:
         logged_sec = len(group) * LOG_INTERVAL_SEC
 
-        good_sec = int((group["posture_type"] == GOOD_POSTURE_LABEL).sum() * LOG_INTERVAL_SEC)
-        bad_sec = max(logged_sec - good_sec, 0)
+        posture_type_seconds = count_seconds_by_label(group, "posture_type")
+        fatigue_label_seconds = count_seconds_by_label(group, "fatigue_label")
 
-        drowsy_sec = int((group["fatigue_label"] == DROWSY_LABEL).sum() * LOG_INTERVAL_SEC)
+        good_sec = sum(
+            seconds
+            for label, seconds in posture_type_seconds.items()
+            if is_good_posture_label(label)
+        )
+        bad_sec = sum(
+            seconds
+            for label, seconds in posture_type_seconds.items()
+            if not is_good_posture_label(label)
+            and not is_invalid_label(label)
+        )
+
+        drowsy_sec = sum(
+            seconds
+            for label, seconds in fatigue_label_seconds.items()
+            if is_drowsy_label(label)
+        )
 
         posture_scores = get_numeric_series(group, "posture_score")
         fatigue_scores = get_numeric_series(group, "fatigue_score")
@@ -432,12 +732,12 @@ def build_minute_summary(df: pd.DataFrame) -> List[Dict[str, Any]]:
         if len(posture_scores) > 0:
             avg_posture_score = safe_round(posture_scores.mean(), digit=1)
         else:
-            avg_posture_score = PLACEHOLDER_POSTURE_SCORE
+            avg_posture_score = calculate_posture_score(posture_type_seconds, logged_sec)
 
         if len(fatigue_scores) > 0:
             avg_fatigue_score = safe_round(fatigue_scores.mean(), digit=1)
         else:
-            avg_fatigue_score = PLACEHOLDER_FATIGUE_SCORE
+            avg_fatigue_score = calculate_fatigue_score(fatigue_label_seconds, logged_sec)
 
         minute_summary = {
             "segment_index": int(segment_index),
@@ -447,12 +747,12 @@ def build_minute_summary(df: pd.DataFrame) -> List[Dict[str, Any]]:
 
             "logged_sec": int(logged_sec),
 
-            "good_sec": good_sec,
-            "bad_sec": bad_sec,
+            "good_sec": int(good_sec),
+            "bad_sec": int(bad_sec),
             "good_ratio": safe_ratio(good_sec, logged_sec),
             "bad_ratio": safe_ratio(bad_sec, logged_sec),
 
-            "drowsy_sec": drowsy_sec,
+            "drowsy_sec": int(drowsy_sec),
             "drowsy_ratio": safe_ratio(drowsy_sec, logged_sec),
 
             "avg_posture_score": avg_posture_score,
@@ -484,6 +784,18 @@ def build_report_summary(df: pd.DataFrame) -> Dict[str, Any]:
 
     if df.empty:
         raise ValueError("요약을 생성할 수 없습니다. 로그 데이터가 비어 있습니다.")
+
+    df = df.copy()
+
+    if "timestamp" not in df.columns:
+        raise ValueError("요약을 생성할 수 없습니다. timestamp 컬럼이 없습니다.")
+
+    df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
+    df = df.dropna(subset=["timestamp"])
+    df = df.sort_values("timestamp").reset_index(drop=True)
+
+    if df.empty:
+        raise ValueError("요약을 생성할 수 없습니다. 유효한 timestamp 데이터가 없습니다.")
 
     start_time = df["timestamp"].min()
     end_time = df["timestamp"].max()

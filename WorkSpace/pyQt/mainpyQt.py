@@ -752,18 +752,24 @@ class MainWindow(QMainWindow):
         if "DISPLAY" not in env:
             env["DISPLAY"] = ":0"
 
+        profile_dir = Path.home() / ".config" / "visionposecoach-chromium"
+        profile_dir.mkdir(parents=True, exist_ok=True)
+
         subprocess.Popen(
             [
                 browser_path,
                 "--kiosk",
+                "--no-first-run",
+                "--no-default-browser-check",
                 "--noerrdialogs",
                 "--disable-infobars",
                 "--disable-session-crashed-bubble",
+                "--password-store=basic",
+                f"--user-data-dir={profile_dir}",
                 url
             ],
             env=env
         )
-
 
     def get_subprocess_creationflags(self):
         if platform.system() == "Windows":
