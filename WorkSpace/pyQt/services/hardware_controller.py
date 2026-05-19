@@ -333,6 +333,7 @@ class HardwareController:
             result.fatigue_index
         """
 
+
         if not self.enabled:
             return
         
@@ -350,11 +351,16 @@ class HardwareController:
         if not self.ensure_connected():
             return
 
+        
         pose_index = getattr(result, "pose_index", None)
         fatigue_index = getattr(result, "fatigue_index", None)
 
         if pose_index is None:
             return
+        
+        print(f"  pose_index: {pose_index}")
+        print(f"  fatigue_index: {fatigue_index}")
+
 
         try:
             # 현재 AI 추론 결과(pose + fatigue)를 기반으로
@@ -375,10 +381,14 @@ class HardwareController:
             #
             # → "ForwardHead" 전송
 
+
             command = self.serial_module.get_alert_result_from_ai(
                 pose_index,
                 fatigue_index
             )
+
+            print(f"  111111")
+            print(f"  222222")
 
             # 생성된 command가 있으면 아두이노로 전송
             # None이면 현재 전송할 상태가 없다는 의미

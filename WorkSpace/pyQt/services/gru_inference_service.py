@@ -43,6 +43,9 @@ class InferenceResult:
     elapsed_sec: int = 0
     rank_text: str = ""
 
+    pose_index: int = 0
+    fatigue_index: int = 0
+
 
 class GruInferenceService:
     """
@@ -106,6 +109,9 @@ class GruInferenceService:
         self.latest_confidence = 0.0
         self.latest_fatigue_label = "Normal"
         self.latest_fatigue_probability = 0.0
+
+        self.latest_pose_index = 0
+        self.latest_fatigue_index = 0
 
         self.posture_counter = Counter()
 
@@ -216,8 +222,8 @@ class GruInferenceService:
                 # print(f"face_window : {self.face_window.__len__()}")
                 # print(f"pose_window : {self.pose_window.__len__()}")
 
-                posture_type, posture_confidence = self.predict_pose()
-                fatigue_label, fatigue_probability = self.predict_face()
+                posture_type, posture_confidence, posture_index = self.predict_pose()
+                fatigue_label, fatigue_probability, fatigue_index = self.predict_face()
                 # fatigue_label, fatigue_probability = "Normal", 0.0
 
             except Exception as e:
@@ -230,6 +236,9 @@ class GruInferenceService:
             self.latest_confidence = posture_confidence
             self.latest_fatigue_label = fatigue_label
             self.latest_fatigue_probability = fatigue_probability
+
+            self.latest_pose_index = posture_index
+            self.latest_fatigue_index = fatigue_index
 
             normal_label = self.labels.get(0, "Optimal")
 
@@ -255,6 +264,8 @@ class GruInferenceService:
                 fatigue_probability=fatigue_probability,
                 elapsed_sec=elapsed_sec,
                 rank_text=self.build_rank_text(),
+                pose_index=posture_index,
+                fatigue_index=fatigue_index,
             )
 
 
@@ -281,6 +292,8 @@ class GruInferenceService:
                 fatigue_probability=self.latest_fatigue_probability,
                 elapsed_sec=elapsed_sec,
                 rank_text=self.build_rank_text(),
+                pose_index=None,
+                fatigue_index=None,
             )
 
 
@@ -388,7 +401,7 @@ class GruInferenceService:
         # print(f"Pose_label_index : {label_index}")
         # print(f"Pose_label : {label}")
 
-        return label, confidence
+        return label, confidence, label_index
 
     def predict_face(self):
         model_input = np.asarray(self.face_window, dtype=np.float32)
@@ -419,7 +432,7 @@ class GruInferenceService:
         # print(f"face_label_index : {label_index}")
         # print(f"face_label : {label}")
 
-        return label, confidence
+        return label, confidence, label_index
     
 
 
