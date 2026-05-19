@@ -219,10 +219,10 @@ void loop() {
       );
     }
 
-    // 턱굄 빨강 (Red)
+    // 턱굄 노랑 (Yellow)
     else if (command == "ChinPropping") {
       blinkFeedback(
-        255, 0, 0,
+        255, 255, 0,
 
         postureAlertCount,  // LED 깜빡임 횟수
         500,    // ON 시간(ms)

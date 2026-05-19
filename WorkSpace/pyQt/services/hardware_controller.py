@@ -65,14 +65,20 @@ class HardwareController:
 
             self.serial_module = arduino_control
 
-            self.arduino = serial.Serial(
-                self.serial_port,
-                self.baud_rate,
-                timeout=self.timeout
-            )
+            self.arduino = serial.Serial()
+            self.arduino.port = self.serial_port
+            self.arduino.baudrate = self.baud_rate
+            self.arduino.timeout = self.timeout
 
-            # 아두이노 리셋 안정화 대기
+            # 일부 아두이노 보드에서 시리얼 오픈 시 자동 리셋을 줄이기 위함
+            self.arduino.dtr = False
+
+            self.arduino.open()
+
             time.sleep(self.connect_delay)
+
+            self.arduino.reset_input_buffer()
+            self.arduino.reset_output_buffer()
 
             self.is_connected = True
             print("[Hardware] 아두이노 연결 완료")
@@ -85,14 +91,9 @@ class HardwareController:
             return False
 
     def set_hardware_Values(self, settings: AlarmSettings):
-        print(f"[Hardware] 새로운 설정값 적용: {settings.alarm_enabled}")
-        print(f"[Hardware] 새로운 설정값 적용: {settings.posture_Hardware_count}")
-        print(f"[Hardware] 새로운 설정값 적용: {settings.fatigue_Hardware_count}")
-        print(f"[Hardware] 새로운 설정값 적용: {settings.bad_posture_duration_sec}")
-        print(f"[Hardware] 새로운 설정값 적용: {settings.fatigue_duration_sec}")
-        print(f"[Hardware] 새로운 설정값 적용: {settings.posture_Strong_limit}")
-        print(f"[Hardware] 새로운 설정값 적용: {settings.fatigue_Strong_limit}")
-        print(f"[Hardware] 새로운 설정값 적용: {settings.strong_alert_cooldown_min}")
+        if not self.enabled:
+            print("[Hardware] 비활성화 상태라 설정 적용을 건너뜁니다.")
+            return
 
         self.set_alert_enabled(settings.alarm_enabled)
 
@@ -289,8 +290,6 @@ class HardwareController:
         except Exception as e:
             print(f"[Hardware] StrongAlert 설정 실패: {e}")
             return False
-
-
 
 
 

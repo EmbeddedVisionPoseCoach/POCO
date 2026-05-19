@@ -33,13 +33,13 @@ class AlarmSettings:
             bad_posture_duration_sec=cls._clamp_int(
                 data.get("bad_posture_duration_sec", default.bad_posture_duration_sec),
                 min_value=1,
-                max_value=300,
+                max_value=10,
                 default_value=default.bad_posture_duration_sec
             ),
             fatigue_duration_sec=cls._clamp_int(
                 data.get("fatigue_duration_sec", default.fatigue_duration_sec),
                 min_value=1,
-                max_value=300,
+                max_value=10,
                 default_value=default.fatigue_duration_sec
             ),
 
@@ -47,31 +47,31 @@ class AlarmSettings:
             posture_Hardware_count=cls._clamp_int(
                 data.get("posture_Hardware_count", default.posture_Hardware_count),
                 min_value=1,
-                max_value=30,
+                max_value=5,
                 default_value=default.posture_Hardware_count
             ),
             fatigue_Hardware_count=cls._clamp_int(
                 data.get("fatigue_Hardware_count", default.fatigue_Hardware_count),
                 min_value=1,
-                max_value=30,
+                max_value=5,
                 default_value=default.fatigue_Hardware_count
             ),
             posture_Strong_limit=cls._clamp_int(
                 data.get("posture_Strong_limit", default.posture_Strong_limit),
                 min_value=1,
-                max_value=30,
+                max_value=5,
                 default_value=default.posture_Strong_limit
             ),
             fatigue_Strong_limit=cls._clamp_int(
                 data.get("fatigue_Strong_limit", default.fatigue_Strong_limit),
                 min_value=1,
-                max_value=30,
+                max_value=5,
                 default_value=default.fatigue_Strong_limit
             ),
             strong_alert_cooldown_min=cls._clamp_int(
                 data.get("strong_alert_cooldown_min", default.strong_alert_cooldown_min),
                 min_value=1,
-                max_value=120,
+                max_value=5,
                 default_value=default.strong_alert_cooldown_min
             ),
         )
