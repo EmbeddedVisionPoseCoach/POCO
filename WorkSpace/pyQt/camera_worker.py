@@ -87,7 +87,7 @@ class OpenCVCameraSource:
 class PiCamera2Source:
     """
     Raspberry Pi Camera Module용 카메라 래퍼.
-
+    haha
     내부적으로 Picamera2를 사용하지만,
     외부에서는 OpenCVCameraSource와 동일하게
     open(), start(), read(), release() 형태로 사용한다.
@@ -212,7 +212,7 @@ class CameraWorker(QThread):
             duration=config.CALIBRATION_TIME,
         )
 
-<<<<<<< HEAD
+
         print("초기화 성공")
 
         # 하드웨어 컨트롤러
@@ -227,13 +227,13 @@ class CameraWorker(QThread):
         else:
             self.hardware_controller = hardware_controller
             self.owns_hardware_controller = False
-=======
+
         # face calibration service 추가
         self.calibration_service_face = CalibrationService(
             baseline_path=self.resolve_workspace_path(config.FACE_BASELINE_PATH),
             duration=config.CALIBRATION_TIME,
         )
->>>>>>> efae355b2ec118ab680fefd0a2174287b68c25a5
+
 
         self.pose_calibration_result = None
         self.face_calibration_result = None
@@ -553,10 +553,7 @@ class CameraWorker(QThread):
                     scaler_path=self.resolve_workspace_path(config.SCALER_PATH_GRU),
                     face_scaler_path=self.resolve_workspace_path(config.SCALER_FACE_PATH_GRU),
                     base_line_path=self.resolve_workspace_path(config.BASELINE_PATH),
-<<<<<<< HEAD
-=======
                     face_base_line_path=self.resolve_workspace_path(config.FACE_BASELINE_PATH),
->>>>>>> efae355b2ec118ab680fefd0a2174287b68c25a5
                     labels=config.POSTURE_LABELS,
                     ui_emit_interval=0.5,
                 )
@@ -654,17 +651,12 @@ class CameraWorker(QThread):
         self.status_changed.emit("초기 자세/얼굴 기준값 측정을 시작합니다. "
                                  f"{config.CALIBRATION_TIME}초 동안 바른 자세를 유지해주세요.")
 
-<<<<<<< HEAD
-    def process_calibration(self, raw_features):
-        """
-        CalibrationService에 feature를 넘겨 baseline을 수집한다.
-=======
+
     def process_calibration(self, raw_features, results_face): #face feature도 넘겨주도록 수정
         """
         Pose baseline과 Face baseline을 동시에 수집한다.
         둘 중 하나가 먼저 끝나도 결과를 보관하고,
         둘 다 끝났을 때만 calibration 완료 처리한다.
->>>>>>> efae355b2ec118ab680fefd0a2174287b68c25a5
         """
 
         # 1. pose calibration
@@ -711,11 +703,7 @@ class CameraWorker(QThread):
         )
 
         self.status_changed.emit(final_message)
-<<<<<<< HEAD
-        self.calibration_finished.emit(result.success, final_message)
-=======
         self.calibration_finished.emit(success, final_message)
->>>>>>> efae355b2ec118ab680fefd0a2174287b68c25a5
 
     def process_measurement(self, raw_features, results_face):
         """
