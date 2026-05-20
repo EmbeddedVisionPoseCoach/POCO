@@ -22,7 +22,7 @@ sys.path.append(str(ROOT_DIR))
 
 
 import modules.config as config
-from modules.features import calculate_features
+from modules.features import calculate_features, calculate_face_features_for_window
 from modules.visualizer import Visualizer
 
 from services.calibration_service import CalibrationService
@@ -87,7 +87,7 @@ class OpenCVCameraSource:
 class PiCamera2Source:
     """
     Raspberry Pi Camera Module용 카메라 래퍼.
-
+    haha
     내부적으로 Picamera2를 사용하지만,
     외부에서는 OpenCVCameraSource와 동일하게
     open(), start(), read(), release() 형태로 사용한다.
@@ -194,7 +194,7 @@ class CameraWorker(QThread):
     measurement_started = pyqtSignal(bool, str)
     result_changed = pyqtSignal(dict)
 
-    def __init__(self, parent=None):
+    def __init__(self, hardware_controller=None, parent=None):
         super().__init__(parent)
 
         self.running = False
@@ -212,15 +212,46 @@ class CameraWorker(QThread):
             duration=config.CALIBRATION_TIME,
         )
 
+
         print("초기화 성공")
 
         # 하드웨어 컨트롤러
-        self.hardware_controller = HardwareController(
-            enabled=config.HARDWARE_ENABLED,
-            serial_port=config.HARDWARE_SERIAL_PORT,
-            baud_rate=config.HARDWARE_BAUD_RATE,
-            timeout=config.HARDWARE_TIMEOUT,
+        if hardware_controller is None:
+            self.hardware_controller = HardwareController(
+                enabled=config.HARDWARE_ENABLED,
+                serial_port=config.HARDWARE_SERIAL_PORT,
+                baud_rate=config.HARDWARE_BAUD_RATE,
+                timeout=config.HARDWARE_TIMEOUT,
+            )
+            self.owns_hardware_controller = True
+        else:
+            self.hardware_controller = hardware_controller
+            self.owns_hardware_controller = False
+
+        # face calibration service 추가
+        self.calibration_service_face = CalibrationService(
+            baseline_path=self.resolve_workspace_path(config.FACE_BASELINE_PATH),
+            duration=config.CALIBRATION_TIME,
         )
+
+
+        self.pose_calibration_result = None
+        self.face_calibration_result = None
+
+        print("초기화 성공")
+
+        # 하드웨어 컨트롤러
+        if hardware_controller is None:
+            self.hardware_controller = HardwareController(
+                enabled=config.HARDWARE_ENABLED,
+                serial_port=config.HARDWARE_SERIAL_PORT,
+                baud_rate=config.HARDWARE_BAUD_RATE,
+                timeout=config.HARDWARE_TIMEOUT,
+            )
+            self.owns_hardware_controller = True
+        else:
+            self.hardware_controller = hardware_controller
+            self.owns_hardware_controller = False
 
         self.inference_service = None
 
@@ -522,6 +553,7 @@ class CameraWorker(QThread):
                     scaler_path=self.resolve_workspace_path(config.SCALER_PATH_GRU),
                     face_scaler_path=self.resolve_workspace_path(config.SCALER_FACE_PATH_GRU),
                     base_line_path=self.resolve_workspace_path(config.BASELINE_PATH),
+                    face_base_line_path=self.resolve_workspace_path(config.FACE_BASELINE_PATH),
                     labels=config.POSTURE_LABELS,
                     ui_emit_interval=0.5,
                 )
@@ -584,7 +616,7 @@ class CameraWorker(QThread):
             self.process_HardWare_then_calibration()
 
         if self.mode == RunMode.CALIBRATING:
-            self.process_calibration(raw_features)
+            self.process_calibration(raw_features, results_face)
 
         elif self.mode == RunMode.MEASURING:
             self.process_measurement(raw_features, results_face)
@@ -609,30 +641,69 @@ class CameraWorker(QThread):
         if not hardware_success:
             self.status_changed.emit("수평 보정에 실패했거나 건너뛰었습니다.")
 
+        self.pose_calibration_result = None
+        self.face_calibration_result = None
+
         result = self.calibration_service.start()
+        result = self.calibration_service_face.start()  #face calibration 시작
 
         self.mode = RunMode.CALIBRATING
-        self.status_changed.emit(result.message)
+        self.status_changed.emit("초기 자세/얼굴 기준값 측정을 시작합니다. "
+                                 f"{config.CALIBRATION_TIME}초 동안 바른 자세를 유지해주세요.")
 
-    def process_calibration(self, raw_features):
+
+    def process_calibration(self, raw_features, results_face): #face feature도 넘겨주도록 수정
         """
-        CalibrationService에 feature를 넘겨 baseline을 수집한다.
+        Pose baseline과 Face baseline을 동시에 수집한다.
+        둘 중 하나가 먼저 끝나도 결과를 보관하고,
+        둘 다 끝났을 때만 calibration 완료 처리한다.
         """
 
-        result = self.calibration_service.update(raw_features)
+        # 1. pose calibration
+        if self.pose_calibration_result is None:
+            pose_result = self.calibration_service.update(raw_features)
+            self.emit_status_interval(pose_result.message)
 
-        self.emit_status_interval(result.message)
+            if pose_result.is_finished:
+                self.pose_calibration_result = pose_result
 
-        if not result.is_finished:
+        # 2. face calibration
+        if self.face_calibration_result is None:
+            face_features = self.build_face_calibration_features(results_face)
+
+            if face_features is None:
+                self.emit_status_interval("얼굴 feature를 수집하지 못했습니다. 얼굴이 보이도록 앉아주세요.")
+                return
+
+            face_result = self.calibration_service_face.update(face_features)
+            self.emit_status_interval(face_result.message)
+
+            if face_result.is_finished:
+                self.face_calibration_result = face_result
+
+        # 3. 둘 다 끝났는지 확인
+        if self.pose_calibration_result is None:
             return
 
-        # 캘리브레이션 완료 후 자동으로 프리뷰 상태로 복귀
-        self.mode = RunMode.PREVIEW
+        if self.face_calibration_result is None:
+            return
 
-        final_message = f"{result.message}\n저장 경로: {result.baseline_path}"
+        self.mode = RunMode.PREVIEW # preview 모드로 돌아가지만, 수집된 baseline은 보관한다.
+
+        success = (
+            self.pose_calibration_result.success
+            and self.face_calibration_result.success
+        )
+
+        final_message = (
+            f"{self.pose_calibration_result.message}\n"
+            f"자세 기준값 저장 경로: {self.pose_calibration_result.baseline_path}\n\n"
+            f"{self.face_calibration_result.message}\n"
+            f"얼굴 기준값 저장 경로: {self.face_calibration_result.baseline_path}"
+        )
 
         self.status_changed.emit(final_message)
-        self.calibration_finished.emit(result.success, final_message)
+        self.calibration_finished.emit(success, final_message)
 
     def process_measurement(self, raw_features, results_face):
         """
@@ -689,6 +760,40 @@ class CameraWorker(QThread):
             return False
 
         return True
+    
+    # face feature가 유효한지 검사하는 함수 추가
+    def build_face_calibration_features(self, results_face):
+        """
+        Face calibration용 4개 feature를 만든다.
+        GRU face 모델 입력과 동일한 순서:
+        [eyeBlinkLeft, eyeBlinkRight, blink_average, jawOpen]
+        """
+
+        if results_face is None:
+            return None
+
+        if not hasattr(results_face, "face_blendshapes"):
+            return None
+
+        face_features = calculate_face_features_for_window(
+            results_face.face_blendshapes
+        )
+
+        if face_features is None:
+            return None
+
+        feature_array = np.asarray(face_features, dtype=np.float32)
+
+        if feature_array.size != config.FACE_FEATURE_SIZE:
+            self.emit_status_interval(
+                f"face feature 개수 불일치: 현재={feature_array.size}, 필요={config.FACE_FEATURE_SIZE}"
+            )
+            return None
+
+        if not np.any(feature_array):
+            return None
+
+        return feature_array
 
     def extract_face_landmarks(self, results_face):
         """
@@ -762,7 +867,6 @@ class CameraWorker(QThread):
 
         카메라 루프 종료, 서비스 정리, 리소스 해제를 수행한다.
         """
-
         self.running = False
 
         self.pending_preview_start = False
@@ -770,6 +874,10 @@ class CameraWorker(QThread):
         self.pending_measurement_start = False
 
         self.calibration_service.cancel()
+        self.calibration_service_face.cancel()
+
+        self.pose_calibration_result = None
+        self.face_calibration_result = None
 
         if self.inference_service is not None:
             self.inference_service.stop()
@@ -790,7 +898,7 @@ class CameraWorker(QThread):
             self.pose_detector.close()
             self.pose_detector = None
 
-        if self.hardware_controller is not None:
+        if (self.hardware_controller is not None and self.owns_hardware_controller):
             self.hardware_controller.close()
 
         if self.face_detector is not None:

@@ -43,6 +43,9 @@ class InferenceResult:
     elapsed_sec: int = 0
     rank_text: str = ""
 
+    pose_index: int = 0
+    fatigue_index: int = 0
+
 
 class GruInferenceService:
     """
@@ -63,6 +66,7 @@ class GruInferenceService:
         scaler_path,
         face_scaler_path,
         base_line_path,
+        face_base_line_path,
         labels=None,
         ui_emit_interval=0.5,
         log_dir="../data/session_log",
@@ -72,8 +76,12 @@ class GruInferenceService:
         self.scaler_path = str(scaler_path)
         self.face_scaler_path = str(face_scaler_path)
 
-        self.base_line = self.load_baseline(base_line_path)
+
+        self.base_line = self.load_baseline(base_line_path, feature_size=config.POSE_FEATURE_SIZE, name="pose")
         print(f"self.base_line : {self.base_line}")
+
+        self.base_line_face = self.load_baseline(face_base_line_path, feature_size=config.FACE_FEATURE_SIZE, name="face")
+        print(f"self.base_line_face : {self.base_line_face}")
 
         self.labels = labels if labels is not None else config.POSTURE_LABELS
         self.face_labels = config.FACE_LABELS
@@ -101,6 +109,9 @@ class GruInferenceService:
         self.latest_confidence = 0.0
         self.latest_fatigue_label = "Normal"
         self.latest_fatigue_probability = 0.0
+
+        self.latest_pose_index = 0
+        self.latest_fatigue_index = 0
 
         self.posture_counter = Counter()
 
@@ -197,9 +208,8 @@ class GruInferenceService:
         safe_pose_features = np.array(safe_pose_features)- self.base_line
         safe_pose_features = list(safe_pose_features)
         
-        # safe_face_features = np.array(safe_face_features)- self.base_line
-        # safe_face_features = list(safe_face_features)
-
+        safe_face_features = np.array(safe_face_features)- self.base_line_face
+        safe_face_features = list(safe_face_features)
 
         self.pose_window.append(safe_pose_features)
         self.face_window.append(safe_face_features)
@@ -212,8 +222,8 @@ class GruInferenceService:
                 # print(f"face_window : {self.face_window.__len__()}")
                 # print(f"pose_window : {self.pose_window.__len__()}")
 
-                posture_type, posture_confidence = self.predict_pose()
-                fatigue_label, fatigue_probability = self.predict_face()
+                posture_type, posture_confidence, posture_index = self.predict_pose()
+                fatigue_label, fatigue_probability, fatigue_index = self.predict_face()
                 # fatigue_label, fatigue_probability = "Normal", 0.0
 
             except Exception as e:
@@ -226,6 +236,9 @@ class GruInferenceService:
             self.latest_confidence = posture_confidence
             self.latest_fatigue_label = fatigue_label
             self.latest_fatigue_probability = fatigue_probability
+
+            self.latest_pose_index = posture_index
+            self.latest_fatigue_index = fatigue_index
 
             normal_label = self.labels.get(0, "Optimal")
 
@@ -251,6 +264,8 @@ class GruInferenceService:
                 fatigue_probability=fatigue_probability,
                 elapsed_sec=elapsed_sec,
                 rank_text=self.build_rank_text(),
+                pose_index=posture_index,
+                fatigue_index=fatigue_index,
             )
 
 
@@ -277,6 +292,8 @@ class GruInferenceService:
                 fatigue_probability=self.latest_fatigue_probability,
                 elapsed_sec=elapsed_sec,
                 rank_text=self.build_rank_text(),
+                pose_index=None,
+                fatigue_index=None,
             )
 
 
@@ -384,7 +401,7 @@ class GruInferenceService:
         # print(f"Pose_label_index : {label_index}")
         # print(f"Pose_label : {label}")
 
-        return label, confidence
+        return label, confidence, label_index
 
     def predict_face(self):
         model_input = np.asarray(self.face_window, dtype=np.float32)
@@ -415,7 +432,7 @@ class GruInferenceService:
         # print(f"face_label_index : {label_index}")
         # print(f"face_label : {label}")
 
-        return label, confidence
+        return label, confidence, label_index
     
 
 
@@ -549,10 +566,20 @@ class GruInferenceService:
             "fatigue_probability": float(fatigue_probability),
         })
 
-    def load_baseline(self, path):
+    def load_baseline(self, path, feature_size, name="baseline"):
         if os.path.exists(path):
-            print(f"✅ 기준값 로드 완료: {path}")
-            return joblib.load(path)
+            print(f"{name} 기준값 로드 완료: {path}")
+            
+            baseline = joblib.load(path)
+            baseline = np.asarray(baseline, dtype=np.float32)
+
+            if baseline.size != feature_size:
+                print(f"{name} 기준값 개수 불일치: "
+                    f"현재={baseline.size}, 필요={feature_size}. 0으로 대체합니다.")
+                return np.zeros(feature_size, dtype=np.float32)
+
+            return baseline
+
         else:
-            print("⚠️ 기준값 파일이 없어 모든 피처를 0으로 초기화합니다.")
-            return np.zeros(config.POSE_FEATURE_SIZE)# 피처가 11개인 경우
+            print(f"{name} 기준값 파일이 없어 모든 피처를 0으로 초기화합니다.")
+            return np.zeros(feature_size, dtype=np.float32)

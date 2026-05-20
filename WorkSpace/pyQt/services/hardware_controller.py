@@ -65,14 +65,20 @@ class HardwareController:
 
             self.serial_module = arduino_control
 
-            self.arduino = serial.Serial(
-                self.serial_port,
-                self.baud_rate,
-                timeout=self.timeout
-            )
+            self.arduino = serial.Serial()
+            self.arduino.port = self.serial_port
+            self.arduino.baudrate = self.baud_rate
+            self.arduino.timeout = self.timeout
 
-            # 아두이노 리셋 안정화 대기
+            # 일부 아두이노 보드에서 시리얼 오픈 시 자동 리셋을 줄이기 위함
+            self.arduino.dtr = False
+
+            self.arduino.open()
+
             time.sleep(self.connect_delay)
+
+            self.arduino.reset_input_buffer()
+            self.arduino.reset_output_buffer()
 
             self.is_connected = True
             print("[Hardware] 아두이노 연결 완료")
@@ -84,21 +90,28 @@ class HardwareController:
             print(f"[Hardware] 연결 실패: {e}")
             return False
 
-    def set_hardware_Values(self, settings : AlarmSettings):
-        print(f"[Hardware] 새로운 설정값 적용: {settings.alarm_enabled}")
-        print(f"[Hardware] 새로운 설정값 적용: {settings.posture_Hardware_count}")
-        print(f"[Hardware] 새로운 설정값 적용: {settings.fatigue_Hardware_count}")
-        print(f"[Hardware] 새로운 설정값 적용: {settings.bad_posture_duration_sec}")
-        print(f"[Hardware] 새로운 설정값 적용: {settings.fatigue_duration_sec}")
-        print(f"[Hardware] 새로운 설정값 적용: {settings.posture_Strong_limit}")
-        print(f"[Hardware] 새로운 설정값 적용: {settings.fatigue_Strong_limit}")
-        print(f"[Hardware] 새로운 설정값 적용: {settings.strong_alert_cooldown_min}")
-        
-        self.alert_enabled(settings.alert_enabled)
-        self.set_alert_counts(settings.posture_Hardware_count, settings.fatigue_Hardware_count)
-        self.set_hold_seconds(settings.bad_posture_duration_sec, settings.fatigue_duration_sec)
-        self.set_strong_alert_settings(settings.posture_Strong_limit, settings.fatigue_Strong_limit, settings.strong_alert_cooldown_min)
+    def set_hardware_Values(self, settings: AlarmSettings):
+        if not self.enabled:
+            print("[Hardware] 비활성화 상태라 설정 적용을 건너뜁니다.")
+            return
 
+        self.set_alert_enabled(settings.alarm_enabled)
+
+        self.set_alert_counts(
+            settings.posture_Hardware_count,
+            settings.fatigue_Hardware_count
+        )
+
+        self.set_hold_seconds(
+            settings.bad_posture_duration_sec,
+            settings.fatigue_duration_sec
+        )
+
+        self.set_strong_alert_settings(
+            settings.posture_Strong_limit,
+            settings.fatigue_Strong_limit,
+            settings.strong_alert_cooldown_min
+        )
 
 
 
@@ -280,8 +293,6 @@ class HardwareController:
 
 
 
-
-
     def start_HardwareSet(self):
         """
         캘리브레이션 전에 1회 실행할 카메라 수평 보정.
@@ -322,6 +333,7 @@ class HardwareController:
             result.fatigue_index
         """
 
+
         if not self.enabled:
             return
         
@@ -339,11 +351,16 @@ class HardwareController:
         if not self.ensure_connected():
             return
 
+        
         pose_index = getattr(result, "pose_index", None)
         fatigue_index = getattr(result, "fatigue_index", None)
 
         if pose_index is None:
             return
+        
+        print(f"  pose_index: {pose_index}")
+        print(f"  fatigue_index: {fatigue_index}")
+
 
         try:
             # 현재 AI 추론 결과(pose + fatigue)를 기반으로
@@ -364,10 +381,14 @@ class HardwareController:
             #
             # → "ForwardHead" 전송
 
+
             command = self.serial_module.get_alert_result_from_ai(
                 pose_index,
                 fatigue_index
             )
+
+            print(f"  111111")
+            print(f"  222222")
 
             # 생성된 command가 있으면 아두이노로 전송
             # None이면 현재 전송할 상태가 없다는 의미

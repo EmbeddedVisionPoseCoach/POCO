@@ -33,6 +33,7 @@ SCALER_FACE_PATH_GRU = 'saved_model/face_scaler_GRU.pkl'
 
 
 BASELINE_PATH = 'saved_model/baseline.pkl'
+FACE_BASELINE_PATH = 'saved_model/baseline_face.pkl'
 
 # 라벨링 및 색상 정보
 POSTURE_LABELS = {0: "Optimal", 1: "Asymmetric", 2: "Forward Head", 3: "Chin Propping"}

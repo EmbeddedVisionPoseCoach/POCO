@@ -788,16 +788,18 @@ def clamp_score(score: float) -> float:
     return max(0.0, min(100.0, float(score)))
 
 
-def make_score_bar_df(posture_score: float, fatigue_score: float) -> pd.DataFrame:
+def make_score_bar_df(posture_score: float, fatigue_score: float, posture_grade: str = "-", fatigue_grade: str = "-") -> pd.DataFrame:
     return pd.DataFrame([
         {
             "name": "자세 점수",
             "score": clamp_score(posture_score),
+            "grade": posture_grade,
             "color": "#37F731"
         },
         {
-            "name": "피로도 점수",  
+            "name": "피로도 점수",
             "score": clamp_score(fatigue_score),
+            "grade": fatigue_grade,
             "color": "#FFB547"
         }
     ])
@@ -815,10 +817,19 @@ def render_score_bar_chart(df: pd.DataFrame, title: str) -> None:
             text=[f"{v:.1f}점" for v in df["score"]],
             textposition="outside",
             textfont=dict(
-                color="#000000",  # 막대 위 텍스트 색상
+                color="#000000",
                 size=12
             ),
-            cliponaxis=False
+            cliponaxis=False,
+
+            # 추가
+            customdata=df[["grade"]],
+            hovertemplate=(
+                "<b>%{x}</b><br>"
+                "점수: %{y:.1f}점<br>"
+                "등급: %{customdata[0]}"
+                "<extra></extra>"
+            )
         )
     )
 
@@ -1841,10 +1852,11 @@ with tab_report:
     fatigue_score = score_summary["fatigue_score"]
 
     score_bar_df = make_score_bar_df(
-    posture_score = posture_score,
-    fatigue_score = fatigue_score
-)
-
+        posture_score=posture_score,
+        fatigue_score=fatigue_score,
+        posture_grade=score_summary.get("posture_grade", "-"),
+        fatigue_grade=score_summary.get("fatigue_grade", "-")
+    )
     left_space, chart_area, right_space = st.columns([1, 4, 1])
 
     with chart_area:

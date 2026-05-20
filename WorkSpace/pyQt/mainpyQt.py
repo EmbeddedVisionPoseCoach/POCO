@@ -18,6 +18,7 @@ sys.path.append(str(ROOT_DIR))
 import modules.config as config
 from camera_worker import CameraWorker
 from modules.app_settings import SettingsManager, AlarmSettings
+from services.hardware_controller import HardwareController
 
 import warnings
 
@@ -41,8 +42,8 @@ class MainWindow(QMainWindow):
     카메라 처리, 랜드마크 탐지, 캘리브레이션 계산은 직접 하지 않는다.
     """
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, hardware_controller=None, parent=None):
+        super().__init__(parent)
 
         ui_path = Path(__file__).parent / "ui" / "pocoApplication_Qss.ui"
         # ui_path = Path(__file__).parent / "ui" / "pocoApplication.ui"
@@ -56,6 +57,14 @@ class MainWindow(QMainWindow):
         self.settings_manager = SettingsManager(
             ROOT_DIR / "data" / "settings" / "alarm_settings.json"
         )
+
+        self.hardware_controller = HardwareController(
+            enabled=config.HARDWARE_ENABLED,
+            serial_port=config.HARDWARE_SERIAL_PORT,
+            baud_rate=config.HARDWARE_BAUD_RATE,
+            timeout=config.HARDWARE_TIMEOUT,
+        )
+
         self.current_alarm_settings = None
 
         self.btnCalibration.clicked.connect(self.on_calibration_clicked)
@@ -130,7 +139,9 @@ class MainWindow(QMainWindow):
         if self.camera_worker is not None and self.camera_worker.isRunning():
             return
 
-        self.camera_worker = CameraWorker()
+        self.camera_worker = CameraWorker(
+            hardware_controller=self.hardware_controller
+        )
 
         self.camera_worker.frame_changed.connect(self.update_camera_view)
         self.camera_worker.status_changed.connect(self.on_status_changed)
@@ -379,6 +390,9 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         self.stop_camera_worker()
 
+        if self.hardware_controller is not None:
+            self.hardware_controller.close()
+
         if self.streamlit_process is not None:
             if self.streamlit_process.poll() is None:
                 self.streamlit_process.terminate()
@@ -504,10 +518,6 @@ class MainWindow(QMainWindow):
 
 
     def on_save_settings_clicked(self):
-        """
-        설정 저장 버튼 클릭 이벤트.
-        """
-
         settings = self.collect_settings_from_ui()
 
         self.settings_manager.save(settings)
@@ -515,13 +525,12 @@ class MainWindow(QMainWindow):
 
         self.set_status("설정이 저장되었습니다.")
 
-        if self.camera_worker is None : 
-            self.ensure_camera_worker()
+        # 절대 여기서 ensure_camera_worker() 호출하지 않기
+        # 설정 저장만 했는데 카메라가 켜지는 원인이 됨
 
-        if not self.camera_worker.hardware_controller :
+        if self.hardware_controller is not None:
             print("[MainWindow] 하드웨어 컨트롤러에 새로운 설정값 적용")
-            self.camera_worker.hardware_controller.set_hardware_Values(settings)
-
+            self.hardware_controller.set_hardware_Values(settings)
 
         QMessageBox.information(
             self,
@@ -743,18 +752,24 @@ class MainWindow(QMainWindow):
         if "DISPLAY" not in env:
             env["DISPLAY"] = ":0"
 
+        profile_dir = Path.home() / ".config" / "visionposecoach-chromium"
+        profile_dir.mkdir(parents=True, exist_ok=True)
+
         subprocess.Popen(
             [
                 browser_path,
                 "--kiosk",
+                "--no-first-run",
+                "--no-default-browser-check",
                 "--noerrdialogs",
                 "--disable-infobars",
                 "--disable-session-crashed-bubble",
+                "--password-store=basic",
+                f"--user-data-dir={profile_dir}",
                 url
             ],
             env=env
         )
-
 
     def get_subprocess_creationflags(self):
         if platform.system() == "Windows":
