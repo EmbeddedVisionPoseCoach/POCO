@@ -74,7 +74,7 @@ DASHBOARD_HEIGHT = 400
 
 
 # GRU 용 상수
-WINDOW_SIZE = 60       # 모델이 요구하는 시퀀스 길이
+WINDOW_SIZE = 30      # 모델이 요구하는 시퀀스 길이
 STRIDE = 5             # 추론 주기 (프레임 단위)
 
 # DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -92,7 +92,7 @@ MODEL_VERSION = MODEL_VERSION_GRU
 # ------------------------------------------------------------
 
 # Windows 개발 환경에서는 False 추천
-HARDWARE_ENABLED = False
+HARDWARE_ENABLED = True
 
 # 아두이노가 연결된 포트 이름
 # 라즈베리파이에서는 보통 Arduino Uno가 /dev/ttyACM0 또는 /dev/ttyUSB0로 잡힘
