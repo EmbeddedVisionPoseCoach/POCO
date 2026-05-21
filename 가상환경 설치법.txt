@@ -1,0 +1,4 @@
+윈도우 환경 
+scripts폴더에 들어가서 
+
+ModuleBatchFile-win (관리자 권한으로 실행)
