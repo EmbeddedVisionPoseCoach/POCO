@@ -92,7 +92,7 @@ MODEL_VERSION = MODEL_VERSION_GRU
 # ------------------------------------------------------------
 
 # Windows 개발 환경에서는 False 추천
-HARDWARE_ENABLED = True
+HARDWARE_ENABLED = False
 
 # 아두이노가 연결된 포트 이름
 # 라즈베리파이에서는 보통 Arduino Uno가 /dev/ttyACM0 또는 /dev/ttyUSB0로 잡힘
