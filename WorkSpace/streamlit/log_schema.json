@@ -1,0 +1,24 @@
+{
+    "required_columns": [
+        "timestamp",
+        "elapsed_sec",
+        "posture_type",
+        "fatigue_label",
+        "fatigue_probability"
+    ],
+    "numeric_columns": [
+        "elapsed_sec",
+        "fatigue_probability"
+    ],
+    "bool_columns": [],
+    "allowed_posture_types": [
+        "Optimal",
+        "Forward Head",
+        "Chin Propping",
+        "Asymmetric"
+    ],
+    "allowed_fatigue_labels": [
+        "Normal",
+        "Drowsy"
+    ]
+}

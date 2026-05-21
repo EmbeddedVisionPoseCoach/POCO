@@ -1,0 +1,10 @@
+{
+    "user_id": "default_user",
+    "user_name": "사용자",
+    "created_at": "2026-05-12 12:21:56",
+    "height_cm": null,
+    "camera_position": "front",
+    "is_baseline_completed": true,
+    "baseline_file": "baseline_config.json",
+    "baseline_completed_at": "2026-05-12 14:02:44"
+}

@@ -1,0 +1,1059 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>MainWindow</class>
+ <widget class="QMainWindow" name="MainWindow">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>840</width>
+    <height>481</height>
+   </rect>
+  </property>
+  <property name="minimumSize">
+   <size>
+    <width>720</width>
+    <height>420</height>
+   </size>
+  </property>
+  <property name="windowTitle">
+   <string>PocoApplication</string>
+  </property>
+  <property name="styleSheet">
+   <string notr="true">QMainWindow {
+    background-color: #F6F8FC;
+}
+QWidget#centralwidget,
+QWidget#tabMain,
+QWidget#tabSettings,
+QWidget#settingsScrollContent {
+    background-color: #F6F8FC;
+}
+QTabWidget::pane {
+    border: 1px solid #DCE5F0;
+    border-radius: 10px;
+    background: #FFFFFF;
+    top: -1px;
+}
+QTabBar::tab {
+    background: #EEF3FA;
+    color: #64748B;
+    border: 1px solid #DCE5F0;
+    border-bottom: none;
+    border-top-left-radius: 8px;
+    border-top-right-radius: 8px;
+    min-width: 82px;
+    min-height: 22px;
+    padding: 2px 10px;
+    font-size: 9pt;
+    font-weight: 800;
+}
+QTabBar::tab:selected {
+    background: #FFFFFF;
+    color: #1D4ED8;
+}
+QFrame#headerFrame,
+QFrame#controlFrame,
+QFrame#rankFrame,
+QFrame#cameraFrame,
+QFrame#infoFrame,
+QFrame#settingsCard,
+QFrame#settingHelpFrame {
+    background-color: #FFFFFF;
+    border: 1px solid #E2E8F0;
+    border-radius: 12px;
+}
+QFrame#rankFrame,
+QFrame#cameraFrame {
+    background-color: #FBFDFF;
+}
+QLabel {
+    color: #263445;
+    background: transparent;
+    font-size: 9pt;
+}
+QLabel#labelTitle {
+    color: #111827;
+    font-size: 13pt;
+    font-weight: 900;
+}
+QLabel#labelStatus {
+    color: #2563EB;
+    font-size: 9pt;
+    font-weight: 800;
+}
+QLabel#sectionTitleControl,
+QLabel#sectionTitleRank,
+QLabel#sectionTitleInfo,
+QLabel#settingsTitle,
+QLabel#settingsHelpTitle {
+    color: #111827;
+    font-size: 10pt;
+    font-weight: 900;
+}
+QLabel#label {
+    background-color: #EEF3FA;
+    border: 1px dashed #B7C6D8;
+    border-radius: 10px;
+    color: #64748B;
+    font-size: 10pt;
+    font-weight: 800;
+}
+QLabel#label_Rank {
+    background-color: #F8FAFC;
+    border: 1px solid #E2E8F0;
+    border-radius: 10px;
+    padding: 8px 10px;
+    color: #1E293B;
+    font-size: 10pt;
+    font-weight: 800;
+    line-height: 150%;
+}
+QLabel#label_CurrentPose,
+QLabel#label_CurrentFatigue,
+QLabel#label_totalsec {
+    background-color: #F8FAFC;
+    border: 1px solid #E2E8F0;
+    border-radius: 10px;
+    color: #111827;
+    font-size: 10pt;
+    font-weight: 800;
+    padding: 5px;
+}
+QPushButton {
+    background-color: #2563EB;
+    color: white;
+    border: none;
+    border-radius: 9px;
+    padding: 6px 8px;
+    font-size: 9pt;
+    font-weight: 900;
+}
+QPushButton:hover {
+    background-color: #1D4ED8;
+}
+QPushButton:pressed {
+    background-color: #1E40AF;
+}
+
+QPushButton#btnCalibration {
+    background-color: #6366F1;
+}
+QPushButton#btnCalibration:hover {
+    background-color: #4F46E5;
+}
+QPushButton#btnCalibration:pressed {
+    background-color: #4338CA;
+}
+QPushButton#btnCalibrationStart {
+    background-color: #14B8A6;
+}
+QPushButton#btnCalibrationStart:hover {
+    background-color: #0D9488;
+}
+QPushButton#btnCalibrationStart:pressed {
+    background-color: #0F766E;
+}
+QPushButton#btnCamOff {
+    background-color: #EF4444;
+}
+QPushButton#btnCamOff:hover {
+    background-color: #DC2626;
+}
+QPushButton#btnReport,
+QPushButton#btnSaveSettings {
+    background-color: #0F766E;
+}
+QPushButton#btnReport:hover,
+QPushButton#btnSaveSettings:hover {
+    background-color: #0D9488;
+}
+QCheckBox {
+    color: #1F2937;
+    font-size: 10pt;
+    font-weight: 800;
+    spacing: 8px;
+}
+QSpinBox,
+QComboBox {
+    background-color: #FFFFFF;
+    border: 1px solid #CBD5E1;
+    border-radius: 8px;
+    padding: 4px 8px;
+    min-height: 24px;
+    color: #111827;
+    font-size: 9pt;
+    font-weight: 700;
+}
+QScrollArea {
+    border: none;
+    background: transparent;
+}
+QLabel#settingsHelpText {
+    color: #475569;
+    font-size: 9pt;
+    line-height: 150%;
+}
+   </string>
+  </property>
+  <widget class="QWidget" name="centralwidget">
+   <layout class="QVBoxLayout" name="centralLayout">
+    <property name="spacing">
+     <number>0</number>
+    </property>
+    <property name="leftMargin">
+     <number>4</number>
+    </property>
+    <property name="topMargin">
+     <number>4</number>
+    </property>
+    <property name="rightMargin">
+     <number>4</number>
+    </property>
+    <property name="bottomMargin">
+     <number>4</number>
+    </property>
+    <item>
+     <widget class="QTabWidget" name="tabWidget">
+      <property name="currentIndex">
+       <number>0</number>
+      </property>
+      <widget class="QWidget" name="tabMain">
+       <attribute name="title">
+        <string>측정 화면</string>
+       </attribute>
+       <layout class="QVBoxLayout" name="mainTabLayout">
+        <property name="spacing">
+         <number>6</number>
+        </property>
+        <property name="leftMargin">
+         <number>6</number>
+        </property>
+        <property name="topMargin">
+         <number>6</number>
+        </property>
+        <property name="rightMargin">
+         <number>6</number>
+        </property>
+        <property name="bottomMargin">
+         <number>6</number>
+        </property>
+        <item>
+         <widget class="QFrame" name="headerFrame">
+          <property name="minimumSize">
+           <size>
+            <width>0</width>
+            <height>38</height>
+           </size>
+          </property>
+          <property name="maximumSize">
+           <size>
+            <width>16777215</width>
+            <height>40</height>
+           </size>
+          </property>
+          <layout class="QHBoxLayout" name="headerLayout">
+           <property name="spacing">
+            <number>6</number>
+           </property>
+           <property name="leftMargin">
+            <number>14</number>
+           </property>
+           <property name="topMargin">
+            <number>4</number>
+           </property>
+           <property name="rightMargin">
+            <number>14</number>
+           </property>
+           <property name="bottomMargin">
+            <number>4</number>
+           </property>
+           <item>
+            <widget class="QLabel" name="labelTitle">
+             <property name="text">
+              <string>POCO 자세 코칭</string>
+             </property>
+             <property name="alignment">
+              <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignVCenter</set>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <spacer name="headerSpacer">
+             <property name="orientation">
+              <enum>Qt::Horizontal</enum>
+             </property>
+             <property name="sizeHint" stdset="0">
+              <size>
+               <width>12</width>
+               <height>20</height>
+              </size>
+             </property>
+            </spacer>
+           </item>
+           <item>
+            <widget class="QLabel" name="labelStatus">
+             <property name="minimumSize">
+              <size>
+               <width>300</width>
+               <height>26</height>
+              </size>
+             </property>
+             <property name="text">
+              <string>대기 중</string>
+             </property>
+             <property name="alignment">
+              <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+             </property>
+            </widget>
+           </item>
+          </layout>
+         </widget>
+        </item>
+        <item>
+         <layout class="QHBoxLayout" name="contentLayout" stretch="2,5">
+          <property name="spacing">
+           <number>7</number>
+          </property>
+          <item>
+           <layout class="QVBoxLayout" name="leftPanelLayout" stretch="0,1">
+            <property name="spacing">
+             <number>7</number>
+            </property>
+            <item>
+             <widget class="QFrame" name="controlFrame">
+              <property name="minimumSize">
+               <size>
+                <width>235</width>
+                <height>168</height>
+               </size>
+              </property>
+              <property name="maximumSize">
+               <size>
+                <width>255</width>
+                <height>182</height>
+               </size>
+              </property>
+              <layout class="QVBoxLayout" name="controlOuterLayout">
+               <property name="spacing">
+                <number>7</number>
+               </property>
+               <property name="leftMargin">
+                <number>8</number>
+               </property>
+               <property name="topMargin">
+                <number>7</number>
+               </property>
+               <property name="rightMargin">
+                <number>8</number>
+               </property>
+               <property name="bottomMargin">
+                <number>8</number>
+               </property>
+               <item>
+                <widget class="QLabel" name="sectionTitleControl">
+                 <property name="maximumSize">
+                  <size>
+                   <width>16777215</width>
+                   <height>18</height>
+                  </size>
+                 </property>
+                 <property name="text">
+                  <string>측정 제어</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <layout class="QGridLayout" name="controlButtonGrid">
+                 <property name="spacing">
+                  <number>9</number>
+                 </property>
+                 <item row="0" column="0">
+                  <widget class="QPushButton" name="btnCalibration">
+                   <property name="minimumSize">
+                    <size>
+                     <width>0</width>
+                     <height>36</height>
+                    </size>
+                   </property>
+                   <property name="text">
+                    <string>초기값 준비</string>
+                   </property>
+                  </widget>
+                 </item>
+                 <item row="0" column="1">
+                  <widget class="QPushButton" name="btnCalibrationStart">
+                   <property name="minimumSize">
+                    <size>
+                     <width>0</width>
+                     <height>36</height>
+                    </size>
+                   </property>
+                   <property name="text">
+                    <string>초기값 측정시작</string>
+                   </property>
+                  </widget>
+                 </item>
+                 <item row="1" column="0">
+                  <widget class="QPushButton" name="btnCamOn">
+                   <property name="minimumSize">
+                    <size>
+                     <width>0</width>
+                     <height>36</height>
+                    </size>
+                   </property>
+                   <property name="text">
+                    <string>자세측정 시작</string>
+                   </property>
+                  </widget>
+                 </item>
+                 <item row="1" column="1">
+                  <widget class="QPushButton" name="btnCamOff">
+                   <property name="minimumSize">
+                    <size>
+                     <width>0</width>
+                     <height>36</height>
+                    </size>
+                   </property>
+                   <property name="text">
+                    <string>자세측정 종료</string>
+                   </property>
+                  </widget>
+                 </item>
+                 <item row="2" column="0" colspan="2">
+                  <widget class="QPushButton" name="btnReport">
+                   <property name="minimumSize">
+                    <size>
+                     <width>0</width>
+                     <height>36</height>
+                    </size>
+                   </property>
+                   <property name="text">
+                    <string>상세 리포트</string>
+                   </property>
+                  </widget>
+                 </item>
+                </layout>
+               </item>
+              </layout>
+             </widget>
+            </item>
+            <item>
+             <widget class="QFrame" name="rankFrame">
+              <property name="minimumSize">
+               <size>
+                <width>235</width>
+                <height>205</height>
+               </size>
+              </property>
+              <property name="maximumSize">
+               <size>
+                <width>255</width>
+                <height>16777215</height>
+               </size>
+              </property>
+              <layout class="QVBoxLayout" name="rankLayout">
+               <property name="spacing">
+                <number>7</number>
+               </property>
+               <property name="leftMargin">
+                <number>9</number>
+               </property>
+               <property name="topMargin">
+                <number>8</number>
+               </property>
+               <property name="rightMargin">
+                <number>9</number>
+               </property>
+               <property name="bottomMargin">
+                <number>9</number>
+               </property>
+               <item>
+                <widget class="QLabel" name="sectionTitleRank">
+                 <property name="text">
+                  <string>자세 순위</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="QLabel" name="label_Rank">
+                 <property name="minimumSize">
+                  <size>
+                   <width>0</width>
+                   <height>145</height>
+                  </size>
+                 </property>
+                 <property name="text">
+                  <string>1위 : -
+2위 : -
+3위 : -</string>
+                 </property>
+                 <property name="alignment">
+                  <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignVCenter</set>
+                 </property>
+                 <property name="wordWrap">
+                  <bool>true</bool>
+                 </property>
+                </widget>
+               </item>
+              </layout>
+             </widget>
+            </item>
+           </layout>
+          </item>
+          <item>
+           <layout class="QVBoxLayout" name="rightPanelLayout" stretch="0,1">
+            <property name="spacing">
+             <number>7</number>
+            </property>
+            <item>
+             <widget class="QFrame" name="cameraFrame">
+              <property name="minimumSize">
+               <size>
+                <width>0</width>
+                <height>268</height>
+               </size>
+              </property>
+              <property name="maximumSize">
+               <size>
+                <width>16777215</width>
+                <height>278</height>
+               </size>
+              </property>
+              <layout class="QGridLayout" name="cameraLayout">
+               <property name="leftMargin">
+                <number>10</number>
+               </property>
+               <property name="topMargin">
+                <number>10</number>
+               </property>
+               <property name="rightMargin">
+                <number>10</number>
+               </property>
+               <property name="bottomMargin">
+                <number>10</number>
+               </property>
+               <property name="spacing">
+                <number>0</number>
+               </property>
+               <item row="0" column="0">
+                <widget class="QLabel" name="label">
+                 <property name="minimumSize">
+                  <size>
+                   <width>320</width>
+                   <height>240</height>
+                  </size>
+                 </property>
+                 <property name="maximumSize">
+                  <size>
+                   <width>320</width>
+                   <height>240</height>
+                  </size>
+                 </property>
+                 <property name="text">
+                  <string>Camera Preview 4:3</string>
+                 </property>
+                 <property name="alignment">
+                  <set>Qt::AlignCenter</set>
+                 </property>
+                </widget>
+               </item>
+              </layout>
+             </widget>
+            </item>
+            <item>
+             <widget class="QFrame" name="infoFrame">
+              <property name="minimumSize">
+               <size>
+                <width>0</width>
+                <height>96</height>
+               </size>
+              </property>
+              <property name="maximumSize">
+               <size>
+                <width>16777215</width>
+                <height>110</height>
+               </size>
+              </property>
+              <layout class="QVBoxLayout" name="infoOuterLayout">
+               <property name="spacing">
+                <number>6</number>
+               </property>
+               <property name="leftMargin">
+                <number>9</number>
+               </property>
+               <property name="topMargin">
+                <number>7</number>
+               </property>
+               <property name="rightMargin">
+                <number>9</number>
+               </property>
+               <property name="bottomMargin">
+                <number>9</number>
+               </property>
+               <item>
+                <widget class="QLabel" name="sectionTitleInfo">
+                 <property name="maximumSize">
+                  <size>
+                   <width>16777215</width>
+                   <height>18</height>
+                  </size>
+                 </property>
+                 <property name="text">
+                  <string>현재 상태</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <layout class="QGridLayout" name="infoGrid">
+                 <property name="spacing">
+                  <number>7</number>
+                 </property>
+                 <item row="0" column="0">
+                  <widget class="QLabel" name="label_CurrentPose">
+                   <property name="minimumSize">
+                    <size>
+                     <width>0</width>
+                     <height>52</height>
+                    </size>
+                   </property>
+                   <property name="text">
+                    <string>현재 자세
+-</string>
+                   </property>
+                   <property name="alignment">
+                    <set>Qt::AlignCenter</set>
+                   </property>
+                  </widget>
+                 </item>
+                 <item row="0" column="1">
+                  <widget class="QLabel" name="label_CurrentFatigue">
+                   <property name="minimumSize">
+                    <size>
+                     <width>0</width>
+                     <height>52</height>
+                    </size>
+                   </property>
+                   <property name="text">
+                    <string>현재 피로도
+-</string>
+                   </property>
+                   <property name="alignment">
+                    <set>Qt::AlignCenter</set>
+                   </property>
+                  </widget>
+                 </item>
+                 <item row="0" column="2">
+                  <widget class="QLabel" name="label_totalsec">
+                   <property name="minimumSize">
+                    <size>
+                     <width>0</width>
+                     <height>52</height>
+                    </size>
+                   </property>
+                   <property name="text">
+                    <string>측정 시간
+00:00</string>
+                   </property>
+                   <property name="alignment">
+                    <set>Qt::AlignCenter</set>
+                   </property>
+                  </widget>
+                 </item>
+                </layout>
+               </item>
+              </layout>
+             </widget>
+            </item>
+           </layout>
+          </item>
+         </layout>
+        </item>
+       </layout>
+      </widget>
+      <widget class="QWidget" name="tabSettings">
+       <attribute name="title">
+        <string>설정</string>
+       </attribute>
+       <layout class="QVBoxLayout" name="settingsTabLayout">
+        <property name="spacing">
+         <number>6</number>
+        </property>
+        <property name="leftMargin">
+         <number>6</number>
+        </property>
+        <property name="topMargin">
+         <number>6</number>
+        </property>
+        <property name="rightMargin">
+         <number>6</number>
+        </property>
+        <property name="bottomMargin">
+         <number>6</number>
+        </property>
+        <item>
+         <widget class="QScrollArea" name="settingsScrollArea">
+          <property name="widgetResizable">
+           <bool>true</bool>
+          </property>
+          <widget class="QWidget" name="settingsScrollContent">
+           <property name="geometry">
+            <rect>
+             <x>0</x>
+             <y>0</y>
+             <width>818</width>
+             <height>433</height>
+            </rect>
+           </property>
+           <layout class="QHBoxLayout" name="settingsContentLayout" stretch="3,2">
+            <property name="spacing">
+             <number>10</number>
+            </property>
+            <property name="leftMargin">
+             <number>0</number>
+            </property>
+            <property name="topMargin">
+             <number>0</number>
+            </property>
+            <property name="rightMargin">
+             <number>0</number>
+            </property>
+            <property name="bottomMargin">
+             <number>0</number>
+            </property>
+            <item>
+             <widget class="QFrame" name="settingsCard">
+              <property name="minimumSize">
+               <size>
+                <width>420</width>
+                <height>0</height>
+               </size>
+              </property>
+              <layout class="QVBoxLayout" name="settingsCardLayout">
+               <property name="spacing">
+                <number>9</number>
+               </property>
+               <property name="leftMargin">
+                <number>16</number>
+               </property>
+               <property name="topMargin">
+                <number>14</number>
+               </property>
+               <property name="rightMargin">
+                <number>16</number>
+               </property>
+               <property name="bottomMargin">
+                <number>14</number>
+               </property>
+               <item>
+                <widget class="QLabel" name="settingsTitle">
+                 <property name="text">
+                  <string>하드웨어 알림 설정</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="QCheckBox" name="checkAlarmEnabled">
+                 <property name="minimumSize">
+                  <size>
+                   <width>0</width>
+                   <height>28</height>
+                  </size>
+                 </property>
+                 <property name="text">
+                  <string>알림 사용</string>
+                 </property>
+                 <property name="checked">
+                  <bool>true</bool>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <layout class="QGridLayout" name="alarmSettingGrid">
+                 <property name="horizontalSpacing">
+                  <number>12</number>
+                 </property>
+                 <property name="verticalSpacing">
+                  <number>8</number>
+                 </property>
+                 <item row="2" column="1">
+                  <widget class="QSpinBox" name="spinPostureAlertCount">
+                   <property name="suffix">
+                    <string> 회</string>
+                   </property>
+                   <property name="minimum">
+                    <number>1</number>
+                   </property>
+                   <property name="maximum">
+                    <number>20</number>
+                   </property>
+                   <property name="value">
+                    <number>5</number>
+                   </property>
+                  </widget>
+                 </item>
+                 <item row="4" column="0">
+                  <widget class="QLabel" name="labelPostureStrongLimitTitle">
+                   <property name="text">
+                    <string>자세 강한 알림 횟수</string>
+                   </property>
+                   <property name="alignment">
+                    <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignVCenter</set>
+                   </property>
+                  </widget>
+                 </item>
+                 <item row="5" column="0">
+                  <widget class="QLabel" name="labelDrowsyStrongLimitTitle">
+                   <property name="text">
+                    <string>졸음 강한 알림 횟수</string>
+                   </property>
+                   <property name="alignment">
+                    <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignVCenter</set>
+                   </property>
+                  </widget>
+                 </item>
+                 <item row="3" column="1">
+                  <widget class="QSpinBox" name="spinDrowsyAlertCount">
+                   <property name="suffix">
+                    <string> 회</string>
+                   </property>
+                   <property name="minimum">
+                    <number>1</number>
+                   </property>
+                   <property name="maximum">
+                    <number>20</number>
+                   </property>
+                   <property name="value">
+                    <number>3</number>
+                   </property>
+                  </widget>
+                 </item>
+                 <item row="3" column="0">
+                  <widget class="QLabel" name="labelDrowsyAlertCountTitle">
+                   <property name="text">
+                    <string>졸음 LED/부저 반복횟수</string>
+                   </property>
+                   <property name="alignment">
+                    <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignVCenter</set>
+                   </property>
+                  </widget>
+                 </item>
+                 <item row="0" column="1">
+                  <widget class="QSpinBox" name="spinBadPostureDurationSec">
+                   <property name="suffix">
+                    <string> 초</string>
+                   </property>
+                   <property name="minimum">
+                    <number>1</number>
+                   </property>
+                   <property name="maximum">
+                    <number>300</number>
+                   </property>
+                   <property name="value">
+                    <number>5</number>
+                   </property>
+                  </widget>
+                 </item>
+                 <item row="6" column="0">
+                  <widget class="QLabel" name="labelStrongCooldownTitle">
+                   <property name="text">
+                    <string>강한 알림 후 쿨타임</string>
+                   </property>
+                   <property name="alignment">
+                    <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignVCenter</set>
+                   </property>
+                  </widget>
+                 </item>
+                 <item row="4" column="1">
+                  <widget class="QSpinBox" name="spinPostureStrongLimit">
+                   <property name="suffix">
+                    <string> 회</string>
+                   </property>
+                   <property name="minimum">
+                    <number>1</number>
+                   </property>
+                   <property name="maximum">
+                    <number>20</number>
+                   </property>
+                   <property name="value">
+                    <number>3</number>
+                   </property>
+                  </widget>
+                 </item>
+                 <item row="6" column="1">
+                  <widget class="QSpinBox" name="spinStrongAlertCooldownMin">
+                   <property name="suffix">
+                    <string> 분</string>
+                   </property>
+                   <property name="minimum">
+                    <number>1</number>
+                   </property>
+                   <property name="maximum">
+                    <number>60</number>
+                   </property>
+                   <property name="value">
+                    <number>5</number>
+                   </property>
+                  </widget>
+                 </item>
+                 <item row="1" column="0">
+                  <widget class="QLabel" name="labelFatigueDurationTitle">
+                   <property name="text">
+                    <string>피로 상태 지속 기준</string>
+                   </property>
+                   <property name="alignment">
+                    <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignVCenter</set>
+                   </property>
+                  </widget>
+                 </item>
+                 <item row="2" column="0">
+                  <widget class="QLabel" name="labelPostureAlertCountTitle">
+                   <property name="text">
+                    <string>자세 LED/부저 반복횟수</string>
+                   </property>
+                   <property name="alignment">
+                    <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignVCenter</set>
+                   </property>
+                  </widget>
+                 </item>
+                 <item row="1" column="1">
+                  <widget class="QSpinBox" name="spinFatigueDurationSec">
+                   <property name="suffix">
+                    <string> 초</string>
+                   </property>
+                   <property name="minimum">
+                    <number>1</number>
+                   </property>
+                   <property name="maximum">
+                    <number>300</number>
+                   </property>
+                   <property name="value">
+                    <number>5</number>
+                   </property>
+                  </widget>
+                 </item>
+                 <item row="5" column="1">
+                  <widget class="QSpinBox" name="spinDrowsyStrongLimit">
+                   <property name="suffix">
+                    <string> 회</string>
+                   </property>
+                   <property name="minimum">
+                    <number>1</number>
+                   </property>
+                   <property name="maximum">
+                    <number>20</number>
+                   </property>
+                   <property name="value">
+                    <number>2</number>
+                   </property>
+                  </widget>
+                 </item>
+                 <item row="0" column="0">
+                  <widget class="QLabel" name="labelBadPostureDurationTitle">
+                   <property name="text">
+                    <string>나쁜 자세 지속 기준</string>
+                   </property>
+                   <property name="alignment">
+                    <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignVCenter</set>
+                   </property>
+                  </widget>
+                 </item>
+                </layout>
+               </item>
+               <item>
+                <spacer name="settingsCardSpacer">
+                 <property name="orientation">
+                  <enum>Qt::Vertical</enum>
+                 </property>
+                 <property name="sizeHint" stdset="0">
+                  <size>
+                   <width>20</width>
+                   <height>10</height>
+                  </size>
+                 </property>
+                </spacer>
+               </item>
+              </layout>
+             </widget>
+            </item>
+            <item>
+             <widget class="QFrame" name="settingHelpFrame">
+              <layout class="QVBoxLayout" name="settingHelpLayout">
+               <property name="spacing">
+                <number>9</number>
+               </property>
+               <property name="leftMargin">
+                <number>16</number>
+               </property>
+               <property name="topMargin">
+                <number>14</number>
+               </property>
+               <property name="rightMargin">
+                <number>16</number>
+               </property>
+               <property name="bottomMargin">
+                <number>14</number>
+               </property>
+               <item>
+                <widget class="QLabel" name="settingsHelpTitle">
+                 <property name="text">
+                  <string>설정 설명</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="QLabel" name="settingsHelpText">
+                 <property name="text">
+                  <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;나쁜 자세 또는 졸음 상태가 설정한 지속 기준 이상 유지되면 일반 LED/부저 알림이 울립니다.&lt;/p&gt;&lt;p&gt;일반 알림이 울린 뒤에도 같은 상태가 계속 유지되면, 설정한 알림 반복 간격마다 다시 알림이 발생합니다.&lt;/p&gt;&lt;p&gt;자세와 졸음의 LED/부저 반복 횟수는 각각 따로 설정할 수 있습니다.&lt;/p&gt;&lt;p&gt;&lt;br/&gt;같은 종류의 알림이 연속으로 설정한 다시 알림 횟수만큼 발생하면 강한 알림이 울립니다.&lt;/p&gt;&lt;p&gt;강한 알림이 울린 뒤에는 해당 알림만 쿨타임 동안 중단됩니다.&lt;/p&gt;&lt;p&gt;중간에 다른 자세나 다른 상태가 감지되면 강한 알림 카운트는 초기화됩니다.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                 </property>
+                 <property name="alignment">
+                  <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignTop</set>
+                 </property>
+                 <property name="wordWrap">
+                  <bool>true</bool>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <spacer name="settingsHelpSpacer">
+                 <property name="orientation">
+                  <enum>Qt::Vertical</enum>
+                 </property>
+                 <property name="sizeHint" stdset="0">
+                  <size>
+                   <width>20</width>
+                   <height>20</height>
+                  </size>
+                 </property>
+                </spacer>
+               </item>
+               <item>
+                <widget class="QPushButton" name="btnSaveSettings">
+                 <property name="minimumSize">
+                  <size>
+                   <width>0</width>
+                   <height>34</height>
+                  </size>
+                 </property>
+                 <property name="text">
+                  <string>설정 저장</string>
+                 </property>
+                </widget>
+               </item>
+              </layout>
+             </widget>
+            </item>
+           </layout>
+          </widget>
+         </widget>
+        </item>
+       </layout>
+      </widget>
+     </widget>
+    </item>
+   </layout>
+  </widget>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>
