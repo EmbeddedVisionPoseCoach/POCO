@@ -1,6 +1,7 @@
 import sys
 import time
 from pathlib import Path
+import threading
 
 
 ROOT_DIR = Path(__file__).resolve().parent.parent.parent
@@ -42,6 +43,8 @@ class HardwareController:
 
         # 하드웨어 팀 모듈 함수들
         self.serial_module = None
+
+        self.lock = threading.RLock()
 
     def connect(self):
         """
@@ -319,6 +322,37 @@ class HardwareController:
             return False
 
     def update_hardware(self, result):
+        with self.lock:
+            self._update_hardware_internal(result)
+       
+
+    def ensure_connected(self):
+        """
+        연결되어 있으면 True.
+        연결 안 되어 있으면 한 번 연결 시도.
+        """
+
+        if self.is_connected and self.arduino is not None:
+            return True
+
+        return self.connect()
+
+    def close(self):
+        """
+        시리얼 연결 종료.
+        """
+
+        try:
+            if self.arduino is not None:
+                self.arduino.close()
+                print("[Hardware] 시리얼 연결 종료")
+        except Exception:
+            pass
+
+        self.arduino = None
+        self.is_connected = False
+
+    def _update_hardware_internal(self, result) :
         """
         추론 결과를 받아 하드웨어 제어 함수로 넘긴다.
 
@@ -405,32 +439,5 @@ class HardwareController:
             self.serial_module.read_response(
                 self.arduino
             )
-
         except Exception as e:
             print(f"[Hardware] result 처리 실패: {e}")
-
-    def ensure_connected(self):
-        """
-        연결되어 있으면 True.
-        연결 안 되어 있으면 한 번 연결 시도.
-        """
-
-        if self.is_connected and self.arduino is not None:
-            return True
-
-        return self.connect()
-
-    def close(self):
-        """
-        시리얼 연결 종료.
-        """
-
-        try:
-            if self.arduino is not None:
-                self.arduino.close()
-                print("[Hardware] 시리얼 연결 종료")
-        except Exception:
-            pass
-
-        self.arduino = None
-        self.is_connected = False

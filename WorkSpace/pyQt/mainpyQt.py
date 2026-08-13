@@ -122,7 +122,10 @@ class MainWindow(QMainWindow):
     # Path
     # ---------------------------------------------------------
     def has_baseline(self):
-        return self.resolve_workspace_path(config.BASELINE_PATH).exists()
+        pose_baseline = self.resolve_workspace_path(config.BASELINE_PATH)
+        face_baseline = self.resolve_workspace_path(config.FACE_BASELINE_PATH)
+
+        return pose_baseline.exists() and face_baseline.exists()
 
     def resolve_workspace_path(self, path_text):
         path = Path(path_text)
