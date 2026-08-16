@@ -58,7 +58,7 @@ def create_face_detector():
 
     options = vision.FaceLandmarkerOptions(
         base_options=base_options,
-        running_mode=vision.RunningMode.IMAGE,
+        running_mode=vision.RunningMode.VIDEO,
         output_face_blendshapes=True,
         num_faces=1,
         min_face_detection_confidence=0.5,
@@ -201,7 +201,8 @@ def run_face_process(stop_event, command_queue, result_queue, ring_resources):
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
 
-            results = detector.detect(mp_image)
+            # results = detector.detect(mp_image)
+            results = detector.detect_for_video(mp_image, timestamp_ns // 1_000_000)
             features = build_face_features(results)
 
             if mode == MODE_CALIBRATING:

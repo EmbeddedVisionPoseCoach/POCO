@@ -23,6 +23,7 @@ from services.hardware_controller import HardwareController
 
 
 CAMERA_FPS = 30
+GUI_FPS = 15
 
 
 class OpenCVCameraSource:
@@ -55,6 +56,8 @@ class OpenCVCameraSource:
         if not ret or frame is None:
             return False, None
 
+        frame = cv2.flip(frame, 1)
+
         return True, frame
 
     def release(self):
@@ -64,7 +67,7 @@ class OpenCVCameraSource:
 
 
 class PiCamera2Source:
-    def __init__(self, width=640, height=480, fps=CAMERA_FPS):
+    def __init__(self, width=320, height=240, fps=CAMERA_FPS):
         self.width = width
         self.height = height
         self.fps = fps
@@ -72,17 +75,18 @@ class PiCamera2Source:
 
     def open(self):
         from picamera2 import Picamera2
+        from libcamera import Transform, controls
 
         self.picam2 = Picamera2()
 
         camera_config = self.picam2.create_preview_configuration(
             main={
                 "format": "RGB888",
-                "size": (self.width, self.height)
-            },
-            controls={
-                "FrameRate": self.fps
-            }
+                "size": (self.width, self.height)},
+            raw=None,
+            buffer_count=6,
+            transform=Transform(hflip=True),
+            controls={"FrameRate": self.fps,},
         )
 
         self.picam2.configure(camera_config)
@@ -100,8 +104,7 @@ class PiCamera2Source:
         if frame is None:
             return False, None
 
-        #Shared Ring과 OpenCV 처리 기준을 BGR로 통일
-        frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+        # frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
 
         return True, frame
 
@@ -193,6 +196,9 @@ class CameraWorker(QThread):
         fps_start_time = time.perf_counter()
         display_fps = 0.0
 
+        gui_interval = 1.0 / GUI_FPS
+        last_gui_time = 0.0
+
         try:
             self.camera = self.create_camera_source()
             self.camera.start()
@@ -209,16 +215,12 @@ class CameraWorker(QThread):
                     self.emit_status_interval("카메라 프레임을 읽지 못했습니다.")
                     continue
 
+                # 여기에 이제 하드웨어 제어가 들어가야함 아니면 별도의 스레드를 둬야할듯?
                 if self.hardware_init_requested:
                     self._start_hardware_then_calibration()
 
-                frame = cv2.flip(frame, 1)
-
                 if frame.shape[:2] != (config.FRAME_HEIGHT, config.FRAME_WIDTH):
-                    frame = cv2.resize(
-                        frame,
-                        (config.FRAME_WIDTH, config.FRAME_HEIGHT)
-                    )
+                    frame = cv2.resize(frame, (config.FRAME_WIDTH, config.FRAME_HEIGHT))
 
                 frame_id += 1
                 timestamp_ns = time.perf_counter_ns()
@@ -230,39 +232,39 @@ class CameraWorker(QThread):
                 )
 
                 if not pose_success:
-                    self.emit_status_interval(
-                        f"Pose Ring Overrun 발생: Frame={frame_id}"
-                    )
+                    self.emit_status_interval(f"Pose Ring Overrun 발생: Frame={frame_id}")
 
                 if not face_success:
-                    self.emit_status_interval(
-                        f"Face Ring Overrun 발생: Frame={frame_id}"
-                    )
+                    self.emit_status_interval(f"Face Ring Overrun 발생: Frame={frame_id}")
 
-                #FPS 안보려면 여기 주석 ㄱ
+                #허ㅘㅁ면에서 FPS 안보려면 여기 주석 ㄱ
                 fps_frame_count += 1
                 current_time = time.perf_counter()
-                fps_elapsed = current_time - fps_start_time
 
-                if fps_elapsed >= 1.0:
-                    display_fps = fps_frame_count / fps_elapsed
-                    fps_frame_count = 0
-                    fps_start_time = current_time
+                if current_time - last_gui_time >= gui_interval:
+                    last_gui_time = current_time
 
-                cv2.putText(
-                    frame,
-                    f"FPS: {display_fps:.1f}",
-                    (20, 40),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    1.0,
-                    (0, 255, 0),
-                    2,
-                    cv2.LINE_AA
-                )
+                    fps_elapsed = current_time - fps_start_time
 
-                self.frame_changed.emit(
-                    self.convert_frame_to_qimage(frame)
-                )
+                    if fps_elapsed >= 1.0:
+                        display_fps = fps_frame_count / fps_elapsed
+                        fps_frame_count = 0
+                        fps_start_time = current_time
+
+                    cv2.putText(
+                        frame,
+                        f"FPS: {display_fps:.1f}",
+                        (20, 40),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        1.0,
+                        (0, 255, 0),
+                        2,
+                        cv2.LINE_AA
+                    )
+
+                    self.frame_changed.emit(
+                        self.convert_frame_to_qimage(frame)
+                    )
 
         except Exception as e:
             error_message = traceback.format_exc()
