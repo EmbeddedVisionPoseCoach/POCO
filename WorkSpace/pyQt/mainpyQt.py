@@ -16,7 +16,8 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 sys.path.append(str(ROOT_DIR))
 
 import modules.config as config
-from camera_worker import CameraWorker
+# from camera_worker import CameraWorker
+from camera_worker_profile_all import CameraWorker
 from modules.app_settings import SettingsManager, AlarmSettings
 from services.hardware_controller import HardwareController
 
