@@ -136,6 +136,8 @@ class VisionProcessManager:
         self.slot_count = max(2, int(slot_count))
         self.accept_frames = False
         self.stop_event = self.ctx.Event()
+        self._stopped = False
+        self._queues_closed = False
 
         # ----------------------------------------------------
         # Main <-> Pose / Face
@@ -308,8 +310,13 @@ class VisionProcessManager:
         self.send_main_state("CALIBRATING")
 
     def start_measurement(self):
-        """새 Calibration 없이 저장된 baseline을 로드해 측정을 시작한다."""
-        self.accept_frames = True
+        """새 Calibration 없이 저장된 baseline을 로드해 측정을 시작한다.
+
+        모델/Scaler 로딩은 Pose/Face Process 내부에서 동기적으로 일어나므로
+        START ACK를 받기 전에는 Shared Frame 기록을 잠시 중단한다.
+        카메라/UI 프리뷰는 계속 동작하고 Ring만 채우지 않는다.
+        """
+        self.accept_frames = False
 
         if self.enable_pose:
             if not put_ordered(self.pose_command_queue, "START_MEASUREMENT"):
@@ -329,6 +336,11 @@ class VisionProcessManager:
 
         self.send_main_state("MEASUREMENT_STARTING")
         print(f"[VisionProcessManager] Measurement 시작 요청 ({self.profile_mode})")
+
+    def resume_measurement_frames(self):
+        """Pose/Face가 모델 로드를 끝내고 START ACK를 보낸 뒤 frame 공급을 재개한다."""
+        if not self.stop_event.is_set():
+            self.accept_frames = True
 
     def start_analysis(self):
         self.start_measurement()
@@ -432,6 +444,14 @@ class VisionProcessManager:
     # Shutdown
     # --------------------------------------------------------
     def stop(self):
+        """Vision/Hardware child process와 SharedMemory를 먼저 안전하게 종료한다.
+
+        Queue 자체의 close는 ResultWorker가 완전히 멈춘 뒤 close_queues()에서 수행한다.
+        """
+        if self._stopped:
+            return
+
+        self._stopped = True
         self.accept_frames = False
         self.stop_event.set()
 
@@ -447,34 +467,84 @@ class VisionProcessManager:
             except Exception:
                 pass
 
-        self._stop_process(self.pose_process)
-        self._stop_process(self.face_process)
-        self._stop_process(self.hardware_process)
+        self._stop_process(self.pose_process, "PoseProcess")
+        self._stop_process(self.face_process, "FaceProcess")
+        self._stop_process(self.hardware_process, "HardwareProcess")
+
+        self.pose_process = None
+        self.face_process = None
+        self.hardware_process = None
 
         self._close_frame_channel(self.pose_writer, self.pose_shm)
         self._close_frame_channel(self.face_writer, self.face_shm)
+        self.pose_writer = None
+        self.pose_shm = None
+        self.face_writer = None
+        self.face_shm = None
 
         print(f"[VisionProcessManager] 종료 ({self.profile_mode})")
+
+    def close_queues(self):
+        """모든 Queue feeder thread/file descriptor를 명시적으로 정리한다."""
+        if self._queues_closed:
+            return
+        self._queues_closed = True
+
+        queue_names = [
+            name for name in vars(self)
+            if name.endswith("_queue")
+        ]
+
+        for name in queue_names:
+            queue_obj = getattr(self, name, None)
+            if queue_obj is None:
+                continue
+            try:
+                queue_obj.close()
+            except Exception:
+                pass
+            try:
+                queue_obj.join_thread()
+            except Exception:
+                pass
 
     @staticmethod
     def _close_frame_channel(writer, shm):
         if writer is not None:
-            writer.close()
+            try:
+                writer.close()
+            except Exception:
+                pass
 
         if shm is not None:
-            shm.close()
+            try:
+                shm.close()
+            except Exception:
+                pass
             try:
                 shm.unlink()
             except FileNotFoundError:
                 pass
+            except Exception:
+                pass
 
     @staticmethod
-    def _stop_process(process):
+    def _stop_process(process, process_name="Process"):
         if process is None:
             return
 
         process.join(timeout=5)
 
         if process.is_alive():
+            print(f"[VisionProcessManager] {process_name} 정상 종료 timeout -> terminate")
             process.terminate()
             process.join(timeout=2)
+
+        exitcode = process.exitcode
+        print(f"[VisionProcessManager] {process_name} exitcode={exitcode}")
+
+        try:
+            process.close()
+        except Exception:
+            pass
+

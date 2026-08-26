@@ -310,8 +310,9 @@ class CameraWorker(QThread):
             self.status_changed.emit(f"카메라 오류 발생:\n{e}")
 
         finally:
+            # 카메라는 이 QThread에서 생성했으므로 이 QThread에서 닫는다.
+            # ResultWorker / multiprocessing 자원은 stop() 호출 스레드(Main)에서 정리한다.
             self.release_resources(show_message=(error_message is None))
-            self.shutdown_vision_resources()
 
     def create_camera_source(self):
         width = config.FRAME_WIDTH
@@ -449,6 +450,9 @@ class CameraWorker(QThread):
             self.status_changed.emit(message)
             return
 
+        # 모델/Scaler 로딩 ACK를 받은 뒤에만 Ring frame 공급을 재개한다.
+        # 측정 시작 중 모델 로딩 때문에 Ring이 4개 가득 차는 overrun을 방지한다.
+        self.vision_manager.resume_measurement_frames()
         self.mode = RunMode.MEASURING
         self.vision_manager.send_main_state("MEASURING")
 
@@ -504,8 +508,13 @@ class CameraWorker(QThread):
         self.pending_preview_start = False
         self.pending_calibration_start = False
         self.pending_measurement_start = False
+
+        # 1) Camera QThread가 capture 루프를 빠져나오고 camera.release()까지 끝내게 한다.
         if self.isRunning():
             self.wait()
+
+        # 2) QThread가 종료된 다음, 호출한 Main thread에서 Vision/Result IPC를 정리한다.
+        self.shutdown_vision_resources()
 
     def release_resources(self, show_message=True):
         if self.camera is not None:
@@ -515,9 +524,20 @@ class CameraWorker(QThread):
             self.status_changed.emit("카메라가 종료되었습니다.")
 
     def shutdown_vision_resources(self):
-        if self.result_worker is not None:
-            self.result_worker.stop()
-            self.result_worker = None
-        if self.vision_manager is not None:
-            self.vision_manager.stop()
-            self.vision_manager = None
+        manager = self.vision_manager
+        worker = self.result_worker
+
+        # 생산자 Process를 먼저 멈춰 더 이상 Queue에 쓰지 않게 한다.
+        if manager is not None:
+            manager.stop()
+
+        # 그 다음 Queue consumer인 ResultWorker를 정지한다.
+        if worker is not None:
+            worker.stop()
+
+        # 마지막에 Queue feeder thread / file descriptor를 명시적으로 정리한다.
+        if manager is not None:
+            manager.close_queues()
+
+        self.result_worker = None
+        self.vision_manager = None
