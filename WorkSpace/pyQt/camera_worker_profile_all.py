@@ -19,7 +19,6 @@ import modules.config as config
 
 from managers.vision_process_manager_profile import VisionProcessManager
 from result_worker import VisionResultWorker
-from services.hardware_controller import HardwareController
 
 
 CAMERA_FPS = 30
@@ -90,11 +89,14 @@ class ProfileWindow:
         if ring_stats is not None:
             lines.extend([
                 "------------------------------------------------",
-                f"Pose Pending={ring_stats['pose_pending']} Overrun={ring_stats['pose_overrun']} "
-                f"Written={ring_stats['pose_written']} Read={ring_stats['pose_read']}",
-                f"Face Pending={ring_stats['face_pending']} Overrun={ring_stats['face_overrun']} "
-                f"Written={ring_stats['face_written']} Read={ring_stats['face_read']}",
+                f"Pose Pending={ring_stats['pose_pending']} Skip={ring_stats.get('pose_skipped', 0)} "
+                f"Overrun={ring_stats['pose_overrun']} Written={ring_stats['pose_written']} Read={ring_stats['pose_read']}",
             ])
+            if ring_stats.get("face_enabled", False):
+                lines.append(
+                    f"Face Pending={ring_stats['face_pending']} Skip={ring_stats.get('face_skipped', 0)} "
+                    f"Overrun={ring_stats['face_overrun']} Written={ring_stats['face_written']} Read={ring_stats['face_read']}"
+                )
 
         if temperature is not None:
             lines.append(f"Pi Temperature : {temperature:.1f} C")
@@ -186,7 +188,6 @@ class PiCamera2Source:
 
 class RunMode(Enum):
     PREVIEW = auto()
-    HARDWARE = auto()
     CALIBRATING = auto()
     MEASURING = auto()
 
@@ -197,8 +198,12 @@ class CameraWorker(QThread):
     calibration_finished = pyqtSignal(bool, str)
     measurement_started = pyqtSignal(bool, str)
     result_changed = pyqtSignal(dict)
+    pose_state_changed = pyqtSignal(dict)
+    face_state_changed = pyqtSignal(dict)
+    hardware_changed = pyqtSignal(dict)
+    hardware_event_changed = pyqtSignal(dict)
 
-    def __init__(self, hardware_controller=None, parent=None):
+    def __init__(self, parent=None):
         super().__init__(parent)
 
         self.running = False
@@ -209,33 +214,24 @@ class CameraWorker(QThread):
         self.pending_calibration_start = False
         self.pending_measurement_start = False
 
-        self.hardware_init_requested = False
         self.last_status_emit_time = 0.0
         self.status_emit_interval = 0.4
 
-        if hardware_controller is None:
-            self.hardware_controller = HardwareController(
-                enabled=config.HARDWARE_ENABLED,
-                serial_port=config.HARDWARE_SERIAL_PORT,
-                baud_rate=config.HARDWARE_BAUD_RATE,
-                timeout=config.HARDWARE_TIMEOUT
-            )
-            self.owns_hardware_controller = True
-        else:
-            self.hardware_controller = hardware_controller
-            self.owns_hardware_controller = False
-
         frame_shape = (config.FRAME_HEIGHT, config.FRAME_WIDTH, 3)
-        self.vision_manager = VisionProcessManager(frame_shape=frame_shape, slot_count=32)
+        self.vision_manager = VisionProcessManager(frame_shape=frame_shape)
         self.result_worker = VisionResultWorker(
-            vision_manager=self.vision_manager,
-            hardware_controller=self.hardware_controller
+            vision_manager=self.vision_manager
         )
 
         self.result_worker.status_changed.connect(self.status_changed.emit)
         self.result_worker.result_changed.connect(self.result_changed.emit)
         self.result_worker.calibration_finished.connect(self._on_calibration_finished)
+        self.result_worker.measurement_start_finished.connect(self._on_measurement_start_finished)
         self.result_worker.ready_changed.connect(self._on_vision_ready)
+        self.result_worker.pose_state_changed.connect(self.pose_state_changed.emit)
+        self.result_worker.face_state_changed.connect(self.face_state_changed.emit)
+        self.result_worker.hardware_changed.connect(self.hardware_changed.emit)
+        self.result_worker.hardware_event_changed.connect(self.hardware_event_changed.emit)
 
         self.vision_manager.start()
         self.result_worker.start()
@@ -267,9 +263,6 @@ class CameraWorker(QThread):
                     self.emit_status_interval("카메라 프레임을 읽지 못했습니다.")
                     continue
 
-                if self.hardware_init_requested:
-                    self._start_hardware_then_calibration()
-
                 preprocess_start = time.perf_counter_ns()
                 if frame.shape[:2] != (config.FRAME_HEIGHT, config.FRAME_WIDTH):
                     frame = cv2.resize(frame, (config.FRAME_WIDTH, config.FRAME_HEIGHT))
@@ -280,13 +273,15 @@ class CameraWorker(QThread):
                 timestamp_ns = time.perf_counter_ns()
 
                 shm_start = time.perf_counter_ns()
-                pose_success, face_success = self.vision_manager.write_frame(frame, frame_id, timestamp_ns)
+                pose_success, face_success = self.vision_manager.write_frame(
+                    frame, frame_id, timestamp_ns
+                )
                 shm_end = time.perf_counter_ns()
                 profiler.add("shm", shm_end - shm_start)
 
                 if not pose_success:
                     self.emit_status_interval(f"Pose Ring Overrun 발생: Frame={frame_id}")
-                if not face_success:
+                if self.vision_manager.enable_face and not face_success:
                     self.emit_status_interval(f"Face Ring Overrun 발생: Frame={frame_id}")
 
                 current_time = time.perf_counter()
@@ -373,38 +368,39 @@ class CameraWorker(QThread):
             return
         self.mode = RunMode.PREVIEW
         self.vision_manager.stop_analysis()
+        self.vision_manager.send_main_state("PREVIEW")
         self.status_changed.emit("프리뷰 모드입니다. 바른 자세를 준비해주세요.")
 
     def start_calibration(self):
+        """Calibration 버튼을 눌렀을 때만 새 baseline을 측정/저장한다."""
         if not self.running:
             self.pending_calibration_start = True
             self.status_changed.emit("카메라 준비 중입니다. 준비되면 초기 측정을 시작합니다.")
             return
+
         if not self.result_worker.is_ready:
             self.pending_calibration_start = True
             self.status_changed.emit("AI Process 준비 중입니다.")
             return
-        self.mode = RunMode.HARDWARE
-        self.hardware_init_requested = True
-        self.status_changed.emit("카메라 수평 보정을 시작합니다.")
 
-    def _start_hardware_then_calibration(self):
-        if not self.hardware_init_requested:
-            return
-        self.hardware_init_requested = False
-        self.status_changed.emit("카메라 수평 보정 중입니다.")
-        hardware_success = self.hardware_controller.start_HardwareSet()
-        if not hardware_success:
-            print("[CameraWorker] 수평 보정 실패 또는 비활성 상태")
         self.result_worker.reset_calibration()
         self.vision_manager.start_calibration()
         self.mode = RunMode.CALIBRATING
+
+        targets = []
+        if self.vision_manager.enable_pose:
+            targets.append("Pose")
+        if self.vision_manager.enable_face:
+            targets.append("Face")
+
         self.status_changed.emit(
-            f"초기 자세/얼굴 기준값 측정을 시작합니다. {config.CALIBRATION_TIME}초 동안 바른 자세를 유지해주세요."
+            f"{' / '.join(targets)} 기준값 측정을 시작합니다. "
+            f"{config.CALIBRATION_TIME}초 동안 기준 자세를 유지해주세요."
         )
 
     def _on_calibration_finished(self, success, message):
         self.mode = RunMode.PREVIEW
+        self.vision_manager.send_main_state("PREVIEW")
         self.calibration_finished.emit(success, message)
 
     def start_measurement(self):
@@ -417,17 +413,45 @@ class CameraWorker(QThread):
             self.status_changed.emit("AI Process 준비 중입니다.")
             return
 
-        pose_baseline = self.resolve_workspace_path(config.BASELINE_PATH)
-        face_baseline = self.resolve_workspace_path(config.FACE_BASELINE_PATH)
-        if not pose_baseline.exists() or not face_baseline.exists():
-            message = "Pose / Face Calibration 기준값이 없습니다."
+        missing = []
+
+        if self.vision_manager.enable_pose:
+            pose_baseline = self.resolve_workspace_path(config.BASELINE_PATH)
+            if not pose_baseline.exists():
+                missing.append("Pose")
+
+        if self.vision_manager.enable_face:
+            face_baseline = self.resolve_workspace_path(config.FACE_BASELINE_PATH)
+            if not face_baseline.exists():
+                missing.append("Face")
+
+        if missing:
+            message = f"{', '.join(missing)} Calibration 기준값이 없습니다."
             self.measurement_started.emit(False, message)
             self.status_changed.emit(message)
             return
 
+        # 여기서는 Calibration을 다시 하지 않는다.
+        # 각 Process가 저장된 baseline을 실제로 정상 로드했는지 ACK를 받은 뒤
+        # 측정 시작 성공을 Main UI에 알린다.
+        self.result_worker.reset_measurement_start()
         self.result_worker.start_measurement_session()
         self.vision_manager.start_measurement()
+        self.status_changed.emit("저장된 Calibration 기준값을 불러오는 중입니다.")
+
+    def _on_measurement_start_finished(self, success, detail):
+        if not success:
+            self.vision_manager.stop_analysis()
+            self.result_worker.stop_measurement_session()
+            self.mode = RunMode.PREVIEW
+            message = f"측정 시작 실패: {detail}"
+            self.measurement_started.emit(False, message)
+            self.status_changed.emit(message)
+            return
+
         self.mode = RunMode.MEASURING
+        self.vision_manager.send_main_state("MEASURING")
+
         message = (
             f"GRU 모델 추론을 시작했습니다. {config.WINDOW_SIZE}프레임 수집 후 "
             f"{config.STRIDE}프레임마다 갱신됩니다."
@@ -439,6 +463,7 @@ class CameraWorker(QThread):
         self.vision_manager.stop_analysis()
         self.result_worker.stop_measurement_session()
         self.mode = RunMode.PREVIEW
+        self.vision_manager.send_main_state("PREVIEW")
         self.status_changed.emit("추론을 종료하고 프리뷰 모드로 돌아갑니다.")
 
     def convert_frame_to_qimage(self, frame):
@@ -486,8 +511,6 @@ class CameraWorker(QThread):
         if self.camera is not None:
             self.camera.release()
             self.camera = None
-        if self.owns_hardware_controller and self.hardware_controller is not None:
-            self.hardware_controller.close()
         if show_message:
             self.status_changed.emit("카메라가 종료되었습니다.")
 

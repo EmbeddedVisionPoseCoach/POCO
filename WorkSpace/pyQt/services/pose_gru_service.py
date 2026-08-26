@@ -5,8 +5,6 @@ from pathlib import Path
 import joblib
 import numpy as np
 
-from modules.logger import StudyLogger
-
 ROOT_DIR = Path(__file__).resolve().parents[2]
 sys.path.append(str(ROOT_DIR))
 
@@ -35,19 +33,31 @@ class PoseGruService:
         path = Path(path)
         return path if path.is_absolute() else ROOT_DIR / path
 
-    def load_baseline(self):
+    def load_baseline(self, required=False):
         if not self.baseline_path.exists():
-            print("[PoseGRU] Baseline 없음. 0으로 초기화합니다.")
+            if required:
+                raise FileNotFoundError(f"PoseGRU Baseline 없음 : {self.baseline_path}")
+            print("[PoseGRU] Baseline 없음. 대기 상태에서는 0으로 초기화합니다.")
             return np.zeros(config.POSE_FEATURE_SIZE, dtype=np.float32)
 
         baseline = joblib.load(self.baseline_path)
-        baseline = np.asarray(baseline, dtype=np.float32)
+        baseline = np.asarray(baseline, dtype=np.float32).reshape(-1)
 
         if baseline.size != config.POSE_FEATURE_SIZE:
-            print(
-                f"[PoseGRU] Baseline 크기 오류 : "
+            message = (
+                f"PoseGRU Baseline 크기 오류 : "
                 f"{baseline.size} != {config.POSE_FEATURE_SIZE}"
             )
+            if required:
+                raise ValueError(message)
+            print(f"[PoseGRU] {message}")
+            return np.zeros(config.POSE_FEATURE_SIZE, dtype=np.float32)
+
+        if not np.all(np.isfinite(baseline)):
+            message = f"PoseGRU Baseline에 NaN/Inf가 포함되어 있습니다."
+            if required:
+                raise ValueError(message)
+            print(f"[PoseGRU] {message}")
             return np.zeros(config.POSE_FEATURE_SIZE, dtype=np.float32)
 
         print(f"[PoseGRU] Baseline 로드 완료 : {self.baseline_path}")
@@ -97,9 +107,13 @@ class PoseGruService:
         if not self.is_running:
             return None
 
-        self.frame_count += 1
-
+        # MediaPipe landmark/feature가 없는 frame을 0값으로 GRU에 넣지 않는다.
+        # 사람이 사라진 순간을 임의의 자세/피로 feature로 학습창에 넣는 것을 방지한다.
         safe_features = self.build_features(features)
+        if safe_features is None:
+            return None
+
+        self.frame_count += 1
         corrected_features = safe_features - self.baseline
 
         # 중요: GRU 추론 여부와 상관없이 매 프레임 Window에 들어간다.
@@ -122,12 +136,15 @@ class PoseGruService:
 
     def build_features(self, features):
         if features is None:
-            return np.zeros(config.POSE_FEATURE_SIZE, dtype=np.float32)
+            return None
 
-        features = np.asarray(features, dtype=np.float32)
+        features = np.asarray(features, dtype=np.float32).reshape(-1)
 
         if features.size != config.POSE_FEATURE_SIZE:
-            return np.zeros(config.POSE_FEATURE_SIZE, dtype=np.float32)
+            return None
+
+        if not np.all(np.isfinite(features)):
+            return None
 
         return features
 

@@ -34,19 +34,31 @@ class FaceGruService:
         path = Path(path)
         return path if path.is_absolute() else ROOT_DIR / path
 
-    def load_baseline(self):
+    def load_baseline(self, required=False):
         if not self.baseline_path.exists():
-            print("[FaceGRU] Baseline 없음. 0으로 초기화합니다.")
+            if required:
+                raise FileNotFoundError(f"FaceGRU Baseline 없음 : {self.baseline_path}")
+            print("[FaceGRU] Baseline 없음. 대기 상태에서는 0으로 초기화합니다.")
             return np.zeros(config.FACE_FEATURE_SIZE, dtype=np.float32)
 
         baseline = joblib.load(self.baseline_path)
-        baseline = np.asarray(baseline, dtype=np.float32)
+        baseline = np.asarray(baseline, dtype=np.float32).reshape(-1)
 
         if baseline.size != config.FACE_FEATURE_SIZE:
-            print(
-                f"[FaceGRU] Baseline 크기 오류 : "
+            message = (
+                f"FaceGRU Baseline 크기 오류 : "
                 f"{baseline.size} != {config.FACE_FEATURE_SIZE}"
             )
+            if required:
+                raise ValueError(message)
+            print(f"[FaceGRU] {message}")
+            return np.zeros(config.FACE_FEATURE_SIZE, dtype=np.float32)
+
+        if not np.all(np.isfinite(baseline)):
+            message = f"FaceGRU Baseline에 NaN/Inf가 포함되어 있습니다."
+            if required:
+                raise ValueError(message)
+            print(f"[FaceGRU] {message}")
             return np.zeros(config.FACE_FEATURE_SIZE, dtype=np.float32)
 
         print(f"[FaceGRU] Baseline 로드 완료 : {self.baseline_path}")
@@ -96,9 +108,13 @@ class FaceGruService:
         if not self.is_running:
             return None
 
-        self.frame_count += 1
-
+        # MediaPipe landmark/feature가 없는 frame을 0값으로 GRU에 넣지 않는다.
+        # 사람이 사라진 순간을 임의의 자세/피로 feature로 학습창에 넣는 것을 방지한다.
         safe_features = self.build_features(features)
+        if safe_features is None:
+            return None
+
+        self.frame_count += 1
         corrected_features = safe_features - self.baseline
 
         # 눈깜빡임 포함 모든 30FPS Feature를 Window에 저장
@@ -120,12 +136,15 @@ class FaceGruService:
 
     def build_features(self, features):
         if features is None:
-            return np.zeros(config.FACE_FEATURE_SIZE, dtype=np.float32)
+            return None
 
-        features = np.asarray(features, dtype=np.float32)
+        features = np.asarray(features, dtype=np.float32).reshape(-1)
 
         if features.size != config.FACE_FEATURE_SIZE:
-            return np.zeros(config.FACE_FEATURE_SIZE, dtype=np.float32)
+            return None
+
+        if not np.all(np.isfinite(features)):
+            return None
 
         return features
 

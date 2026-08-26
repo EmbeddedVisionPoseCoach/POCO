@@ -16,10 +16,9 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 sys.path.append(str(ROOT_DIR))
 
 import modules.config as config
-# from camera_worker import CameraWorker
 from camera_worker_profile_all import CameraWorker
+from managers.vision_process_manager_profile import PROFILE_MODE
 from modules.app_settings import SettingsManager, AlarmSettings
-from services.hardware_controller import HardwareController
 
 import warnings
 
@@ -43,7 +42,7 @@ class MainWindow(QMainWindow):
     카메라 처리, 랜드마크 탐지, 캘리브레이션 계산은 직접 하지 않는다.
     """
 
-    def __init__(self, hardware_controller=None, parent=None):
+    def __init__(self, parent=None):
         super().__init__(parent)
 
         ui_path = Path(__file__).parent / "ui" / "pocoApplication_Qss.ui"
@@ -59,12 +58,12 @@ class MainWindow(QMainWindow):
             ROOT_DIR / "data" / "settings" / "alarm_settings.json"
         )
 
-        self.hardware_controller = HardwareController(
-            enabled=config.HARDWARE_ENABLED,
-            serial_port=config.HARDWARE_SERIAL_PORT,
-            baud_rate=config.HARDWARE_BAUD_RATE,
-            timeout=config.HARDWARE_TIMEOUT,
-        )
+        # Vision / Hardware는 별도 Process로 실행된다.
+        # Main Process는 UI 표시용 최신 상태만 보관한다.
+        self.latest_pose_state = None
+        self.latest_face_state = None
+        self.latest_hardware_state = None
+        self.latest_hardware_event = None
 
         self.current_alarm_settings = None
 
@@ -123,10 +122,20 @@ class MainWindow(QMainWindow):
     # Path
     # ---------------------------------------------------------
     def has_baseline(self):
-        pose_baseline = self.resolve_workspace_path(config.BASELINE_PATH)
-        face_baseline = self.resolve_workspace_path(config.FACE_BASELINE_PATH)
+        """현재 활성화된 Vision Process의 baseline만 검사한다."""
+        mode = str(PROFILE_MODE).upper()
 
-        return pose_baseline.exists() and face_baseline.exists()
+        if mode in ("POSE_ONLY", "BOTH"):
+            pose_baseline = self.resolve_workspace_path(config.BASELINE_PATH)
+            if not pose_baseline.exists():
+                return False
+
+        if mode in ("FACE_ONLY", "BOTH"):
+            face_baseline = self.resolve_workspace_path(config.FACE_BASELINE_PATH)
+            if not face_baseline.exists():
+                return False
+
+        return True
 
     def resolve_workspace_path(self, path_text):
         path = Path(path_text)
@@ -143,15 +152,17 @@ class MainWindow(QMainWindow):
         if self.camera_worker is not None and self.camera_worker.isRunning():
             return
 
-        self.camera_worker = CameraWorker(
-            hardware_controller=self.hardware_controller
-        )
+        self.camera_worker = CameraWorker()
 
         self.camera_worker.frame_changed.connect(self.update_camera_view)
         self.camera_worker.status_changed.connect(self.on_status_changed)
         self.camera_worker.calibration_finished.connect(self.on_calibration_finished)
         self.camera_worker.measurement_started.connect(self.on_measurement_started)
         self.camera_worker.result_changed.connect(self.on_result_changed)
+        self.camera_worker.pose_state_changed.connect(self.on_pose_state_changed)
+        self.camera_worker.face_state_changed.connect(self.on_face_state_changed)
+        self.camera_worker.hardware_changed.connect(self.on_hardware_changed)
+        self.camera_worker.hardware_event_changed.connect(self.on_hardware_event_changed)
 
         self.camera_worker.start()
 
@@ -159,6 +170,33 @@ class MainWindow(QMainWindow):
         if self.camera_worker is not None:
             self.camera_worker.stop()
             self.camera_worker = None
+
+    def on_pose_state_changed(self, state):
+        """Pose Process -> Main Process 최신 landmark/feature/state 수신 지점."""
+        self.latest_pose_state = state
+
+    def on_face_state_changed(self, state):
+        """Face Process -> Main Process 최신 landmark/feature/state 수신 지점."""
+        self.latest_face_state = state
+
+    def on_hardware_changed(self, state):
+        """Hardware Process -> Main Process 최신 State 수신 지점."""
+        self.latest_hardware_state = state
+
+    def on_hardware_event_changed(self, event):
+        """Hardware Process -> Main Process 순서 보장 Event 수신 지점."""
+        self.latest_hardware_event = event
+
+    def send_hardware_command(self, message):
+        """Main Process -> Hardware Process IPC 전송 지점."""
+        if self.camera_worker is None:
+            return False
+
+        manager = getattr(self.camera_worker, "vision_manager", None)
+        if manager is None:
+            return False
+
+        return manager.send_hardware_command(message)
 
     # ---------------------------------------------------------
     # Button Events
@@ -363,10 +401,12 @@ class MainWindow(QMainWindow):
 
             self.btnCalibration.setEnabled(True)
             self.btnCalibrationStart.setEnabled(True)
-            self.btnCamOn.setEnabled(False)
+            # Calibration 실패 시 기존 baseline은 덮어쓰지 않으므로
+            # 이전 정상 baseline이 남아 있으면 측정은 계속 가능하다.
+            self.btnCamOn.setEnabled(self.has_baseline())
             self.btnCamOff.setEnabled(True)
 
-            self.set_status("초기값 설정이 실패했습니다.")
+            self.set_status("초기값 설정이 실패했습니다. 기존 기준값이 있으면 계속 사용할 수 있습니다.")
 
     # ---------------------------------------------------------
     # UI Helper
@@ -393,9 +433,6 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         self.stop_camera_worker()
-
-        if self.hardware_controller is not None:
-            self.hardware_controller.close()
 
         if self.streamlit_process is not None:
             if self.streamlit_process.poll() is None:
@@ -531,10 +568,6 @@ class MainWindow(QMainWindow):
 
         # 절대 여기서 ensure_camera_worker() 호출하지 않기
         # 설정 저장만 했는데 카메라가 켜지는 원인이 됨
-
-        if self.hardware_controller is not None:
-            print("[MainWindow] 하드웨어 컨트롤러에 새로운 설정값 적용")
-            self.hardware_controller.set_hardware_Values(settings)
 
         QMessageBox.information(
             self,

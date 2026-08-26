@@ -30,6 +30,7 @@ sys.path.append(str(ROOT_DIR))
 import modules.config as config
 from modules.features import calculate_features
 from ipc.shared_frame_ring import SharedFrameReader
+from ipc.queue_utils import get_latest, drain_ordered, put_latest, put_ordered
 from services.calibration_service import CalibrationService
 from services.pose_gru_service import PoseGruService
 
@@ -147,7 +148,27 @@ def build_pose_features(results):
     return features
 
 
-def run_pose_process(stop_event, command_queue, result_queue, ring_resources):
+def serialize_pose_landmarks(results):
+    if results is None or not results.pose_landmarks:
+        return None
+
+    return [
+        [float(lm.x), float(lm.y), float(lm.z), float(lm.visibility)]
+        for lm in results.pose_landmarks.landmark
+    ]
+
+
+def run_pose_process(
+    stop_event,
+    command_queue,
+    result_queue,
+    state_to_main_queue,
+    ring_resources,
+    pose_to_hw_state_queue,
+    pose_to_hw_event_queue,
+    hw_to_pose_state_queue,
+    hw_to_pose_event_queue,
+):
     print("[PoseProcess:PROFILE] 시작")
 
     reader = None
@@ -162,6 +183,8 @@ def run_pose_process(stop_event, command_queue, result_queue, ring_resources):
     calibration_missing_count = 0
     stat_start_time = time.monotonic()
     calibration_emit_time = 0.0
+    latest_hardware_state = None
+    latest_hardware_event = None
     profiler = ProcessProfiler("POSE")
 
     try:
@@ -179,15 +202,14 @@ def run_pose_process(stop_event, command_queue, result_queue, ring_resources):
             min_sample_ratio=0.6
         )
 
+        # GRU는 Calibration에 필요하지 않으므로 여기서 로드하지 않는다.
+        # 실제 측정 START_MEASUREMENT에서 lazy load한다.
         gru_service = PoseGruService()
-        gru_start = time.perf_counter_ns()
-        gru_service.load()
-        gru_load_ms = (time.perf_counter_ns() - gru_start) / 1_000_000.0
         init_ms = (time.perf_counter_ns() - init_start) / 1_000_000.0
 
         print(
             f"[POSE INIT PROFILE] Detector={detector_ms:.2f}ms "
-            f"GRU_Load={gru_load_ms:.2f}ms Total={init_ms:.2f}ms"
+            f"GRU_Load=LAZY Total={init_ms:.2f}ms"
         )
 
         result_queue.put({"type": "POSE_READY", "success": True})
@@ -208,23 +230,53 @@ def run_pose_process(stop_event, command_queue, result_queue, ring_resources):
                     stat_start_time = time.monotonic()
                     calibration_emit_time = 0.0
                     profiler.reset()
-                    result_queue.put({
+
+                    started_event = {
                         "type": "POSE_CALIBRATION_STARTED",
-                        "message": calibration_result.message
-                    })
+                        "message": calibration_result.message,
+                        "timestamp": time.time(),
+                    }
+                    result_queue.put(started_event)
+                    put_ordered(pose_to_hw_event_queue, started_event)
                     print("[PoseProcess:PROFILE] Calibration 시작")
 
                 elif command in ("START", "START_MEASUREMENT"):
                     calibration_service.cancel()
-                    gru_service.baseline = gru_service.load_baseline()
-                    gru_service.start()
-                    mode = MODE_MEASURING
-                    previous_frame_id = None
-                    processed_count = 0
-                    sequence_drop_count = 0
-                    stat_start_time = time.monotonic()
-                    profiler.reset()
-                    print("[PoseProcess:PROFILE] 측정 시작")
+
+                    try:
+                        # 측정 시 새 Calibration을 하지 않는다.
+                        # Calibration 버튼에서 저장된 baseline만 다시 로드한다.
+                        gru_service.baseline = gru_service.load_baseline(required=True)
+                        gru_service.start()
+                        mode = MODE_MEASURING
+                        previous_frame_id = None
+                        processed_count = 0
+                        sequence_drop_count = 0
+                        stat_start_time = time.monotonic()
+                        profiler.reset()
+
+                        started_event = {
+                            "type": "POSE_MEASUREMENT_STARTED",
+                            "success": True,
+                            "message": "Pose 저장 baseline 로드 완료",
+                            "timestamp": time.time(),
+                        }
+                        result_queue.put(started_event)
+                        put_ordered(pose_to_hw_event_queue, started_event)
+                        print("[PoseProcess:PROFILE] 측정 시작")
+
+                    except Exception as e:
+                        mode = MODE_WAITING
+                        gru_service.stop()
+                        failed_event = {
+                            "type": "POSE_MEASUREMENT_STARTED",
+                            "success": False,
+                            "message": str(e),
+                            "timestamp": time.time(),
+                        }
+                        result_queue.put(failed_event)
+                        put_ordered(pose_to_hw_event_queue, failed_event)
+                        print(f"[PoseProcess:PROFILE] 측정 시작 실패: {e}")
 
                 elif command == "STOP":
                     mode = MODE_IDLE
@@ -239,12 +291,21 @@ def run_pose_process(stop_event, command_queue, result_queue, ring_resources):
             except Empty:
                 pass
 
+            # Hardware -> Pose
+            # State는 최신값만, Event는 순서대로 모두 수신한다.
+            latest_hardware_state = get_latest(
+                hw_to_pose_state_queue,
+                latest_hardware_state
+            )
+            for hardware_event in drain_ordered(hw_to_pose_event_queue):
+                latest_hardware_event = hardware_event
+
             if mode == MODE_IDLE:
                 time.sleep(0.01)
                 continue
 
             read_start = time.perf_counter_ns()
-            frame_data = reader.read(timeout=0.1)
+            frame_data = reader.read_latest(timeout=0.1)
             read_end = time.perf_counter_ns()
 
             if frame_data is None:
@@ -281,8 +342,25 @@ def run_pose_process(stop_event, command_queue, result_queue, ring_resources):
 
             feature_start = time.perf_counter_ns()
             features = build_pose_features(results)
+            landmarks = serialize_pose_landmarks(results)
             feature_end = time.perf_counter_ns()
             profiler.add("feature", feature_end - feature_start)
+
+            # Pose 최신 상태는 Main과 Hardware가 동일한 구조로 받는다.
+            # Calibration 중에도 MediaPipe landmark / feature가 계속 포함된다.
+            pose_state = {
+                "type": "POSE_STATE",
+                "frame_id": frame_id,
+                "timestamp_ns": timestamp_ns,
+                "mode": mode,
+                "landmark_valid": landmarks is not None,
+                "landmarks": landmarks,
+                "features": features.tolist() if features is not None else None,
+                "inference": None,
+                "calibration": None,
+                "hardware_state": latest_hardware_state,
+                "hardware_event": latest_hardware_event,
+            }
 
             if mode == MODE_CALIBRATING:
                 if features is None:
@@ -293,16 +371,27 @@ def run_pose_process(stop_event, command_queue, result_queue, ring_resources):
                 cal_end = time.perf_counter_ns()
                 profiler.add("calibration", cal_end - cal_start)
 
+                pose_state["calibration"] = {
+                    "is_finished": calibration_result.is_finished,
+                    "success": calibration_result.success,
+                    "remain_time": calibration_result.remain_time,
+                    "sample_count": calibration_result.sample_count,
+                    "missing_count": calibration_missing_count,
+                }
+
                 if calibration_result.is_finished:
                     mode = MODE_WAITING
-                    result_queue.put({
+                    done_event = {
                         "type": "POSE_CALIBRATION_DONE",
                         "success": calibration_result.success,
                         "message": calibration_result.message,
                         "sample_count": calibration_result.sample_count,
                         "missing_count": calibration_missing_count,
-                        "baseline_path": calibration_result.baseline_path
-                    })
+                        "baseline_path": calibration_result.baseline_path,
+                        "timestamp": time.time(),
+                    }
+                    result_queue.put(done_event)
+                    put_ordered(pose_to_hw_event_queue, done_event)
                     print(
                         f"[PoseProcess:PROFILE] Calibration 완료 success={calibration_result.success} "
                         f"samples={calibration_result.sample_count} missing={calibration_missing_count}"
@@ -328,15 +417,27 @@ def run_pose_process(stop_event, command_queue, result_queue, ring_resources):
                 if gru_result is not None:
                     profiler.add("gru_result", gru_end - gru_start)
                     total_latency_ms = (time.perf_counter_ns() - timestamp_ns) / 1_000_000.0
-                    result_queue.put({
+                    pose_result = {
                         "type": "POSE_RESULT",
                         "frame_id": frame_id,
                         "timestamp_ns": timestamp_ns,
                         "posture_type": gru_result["posture_type"],
                         "confidence": gru_result["confidence"],
                         "pose_index": gru_result["pose_index"],
-                        "latency_ms": total_latency_ms
-                    })
+                        "latency_ms": total_latency_ms,
+                    }
+                    result_queue.put(pose_result)
+
+                    pose_state["inference"] = {
+                        "posture_type": gru_result["posture_type"],
+                        "confidence": gru_result["confidence"],
+                        "pose_index": gru_result["pose_index"],
+                        "latency_ms": total_latency_ms,
+                    }
+
+            # State는 항상 최신값 하나만 유지한다.
+            put_latest(state_to_main_queue, pose_state)
+            put_latest(pose_to_hw_state_queue, pose_state)
 
             process_end = time.perf_counter_ns()
             profiler.add("process", process_end - process_start)
@@ -367,11 +468,14 @@ def run_pose_process(stop_event, command_queue, result_queue, ring_resources):
                 profiler.reset()
 
     except Exception as e:
-        result_queue.put({
+        error_event = {
             "type": "POSE_ERROR",
             "success": False,
-            "message": str(e)
-        })
+            "message": str(e),
+            "timestamp": time.time(),
+        }
+        result_queue.put(error_event)
+        put_ordered(pose_to_hw_event_queue, error_event)
         raise
 
     finally:
