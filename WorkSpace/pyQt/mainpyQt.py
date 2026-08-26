@@ -167,9 +167,69 @@ class MainWindow(QMainWindow):
         self.camera_worker.start()
 
     def stop_camera_worker(self):
-        if self.camera_worker is not None:
-            self.camera_worker.stop()
-            self.camera_worker = None
+        print("[SHUTDOWN] Main stop_camera_worker 시작")
+
+        worker = self.camera_worker
+
+        if worker is None:
+            return
+
+        # 종료 중 추가 UI Signal 전달 방지
+        try:
+            worker.frame_changed.disconnect()
+        except Exception:
+            pass
+
+        try:
+            worker.status_changed.disconnect()
+        except Exception:
+            pass
+
+        try:
+            worker.calibration_finished.disconnect()
+        except Exception:
+            pass
+
+        try:
+            worker.measurement_started.disconnect()
+        except Exception:
+            pass
+
+        try:
+            worker.result_changed.disconnect()
+        except Exception:
+            pass
+
+        try:
+            worker.pose_state_changed.disconnect()
+        except Exception:
+            pass
+
+        try:
+            worker.face_state_changed.disconnect()
+        except Exception:
+            pass
+
+        try:
+            worker.hardware_changed.disconnect()
+        except Exception:
+            pass
+
+        try:
+            worker.hardware_event_changed.disconnect()
+        except Exception:
+            pass
+
+        print("[SHUTDOWN] Signal disconnect 완료")
+
+        worker.stop()
+
+        print("[SHUTDOWN] worker.stop 완료")
+
+        self.camera_worker = None
+
+        print("[SHUTDOWN] camera_worker None 완료")
+
 
     def on_pose_state_changed(self, state):
         """Pose Process -> Main Process 최신 landmark/feature/state 수신 지점."""
@@ -432,13 +492,23 @@ class MainWindow(QMainWindow):
             self.labelStatus.setText(message)
 
     def closeEvent(self, event):
+
+        print("[SHUTDOWN] 12. closeEvent 진입")
+
         self.stop_camera_worker()
+
+        print("[SHUTDOWN] 13. Camera 종료 처리 완료")
 
         if self.streamlit_process is not None:
             if self.streamlit_process.poll() is None:
                 self.streamlit_process.terminate()
 
+        print("[SHUTDOWN] 14. event.accept 호출")
+
         event.accept()
+
+
+        print("[SHUTDOWN] 15. closeEvent 종료")
         
     # ---------------------------------------------------------
     # Settings
@@ -826,4 +896,10 @@ if __name__ == "__main__":
     else:
         window.show()             # 윈도우 개발환경에서는 일반 창
 
-    sys.exit(app.exec_())
+    # sys.exit(app.exec_())
+    exit_code = app.exec_()
+
+    print("[SHUTDOWN] 16. QApplication event loop 종료")
+    print("[SHUTDOWN] exit_code =", exit_code)
+
+    sys.exit(exit_code)

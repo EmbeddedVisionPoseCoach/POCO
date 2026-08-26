@@ -175,15 +175,26 @@ class PiCamera2Source:
     def release(self):
         if self.picam2 is None:
             return
+
+        print("[SHUTDOWN] 1. Picamera2 stop 시작")
+
         try:
             self.picam2.stop()
-        except Exception:
-            pass
+            print("[SHUTDOWN] 2. Picamera2 stop 완료")
+        except Exception as e:
+            print("[SHUTDOWN] Picamera2 stop 오류:", e)
+
+        print("[SHUTDOWN] 3. Picamera2 close 시작")
+
         try:
             self.picam2.close()
-        except Exception:
-            pass
+            print("[SHUTDOWN] 4. Picamera2 close 완료")
+        except Exception as e:
+            print("[SHUTDOWN] Picamera2 close 오류:", e)
+
         self.picam2 = None
+
+        print("[SHUTDOWN] 5. Picamera2 객체 해제 완료")
 
 
 class RunMode(Enum):
@@ -312,7 +323,13 @@ class CameraWorker(QThread):
         finally:
             # 카메라는 이 QThread에서 생성했으므로 이 QThread에서 닫는다.
             # ResultWorker / multiprocessing 자원은 stop() 호출 스레드(Main)에서 정리한다.
-            self.release_resources(show_message=(error_message is None))
+            print("[SHUTDOWN] 0. CameraWorker finally 진입")
+
+            self.release_resources(
+                show_message=(error_message is None)
+            )
+
+            print("[SHUTDOWN] 6. CameraWorker finally 종료")
 
     def create_camera_source(self):
         width = config.FRAME_WIDTH
@@ -520,8 +537,8 @@ class CameraWorker(QThread):
         if self.camera is not None:
             self.camera.release()
             self.camera = None
-        if show_message:
-            self.status_changed.emit("카메라가 종료되었습니다.")
+
+        print("[SHUTDOWN] Camera resources released")
 
     def shutdown_vision_resources(self):
         manager = self.vision_manager
