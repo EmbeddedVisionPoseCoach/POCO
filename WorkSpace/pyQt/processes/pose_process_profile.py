@@ -195,6 +195,19 @@ def run_pose_process(
         detector = create_pose_detector()
         detector_ms = (time.perf_counter_ns() - detector_start) / 1_000_000.0
 
+        # MediaPipe graph/TFLite delegate는 첫 process()에서 큰 지연이 생길 수 있다.
+        # POSE_READY 전에 더미 프레임으로 미리 초기화해서 실제 Calibration/Measurement
+        # 시작 직후 Shared Ring overrun이 발생하는 것을 줄인다.
+        warmup_start = time.perf_counter_ns()
+        dummy_rgb = np.zeros(
+            (config.FRAME_HEIGHT, config.FRAME_WIDTH, 3),
+            dtype=np.uint8
+        )
+        for _ in range(2):
+            detector.process(dummy_rgb)
+        warmup_ms = (time.perf_counter_ns() - warmup_start) / 1_000_000.0
+        del dummy_rgb
+
         calibration_service = CalibrationService(
             baseline_path=resolve_workspace_path(config.BASELINE_PATH),
             duration=config.CALIBRATION_TIME,
@@ -209,7 +222,7 @@ def run_pose_process(
 
         print(
             f"[POSE INIT PROFILE] Detector={detector_ms:.2f}ms "
-            f"GRU_Load=LAZY Total={init_ms:.2f}ms"
+            f"Warmup={warmup_ms:.2f}ms GRU_Load=LAZY Total={init_ms:.2f}ms"
         )
 
         result_queue.put({"type": "POSE_READY", "success": True})

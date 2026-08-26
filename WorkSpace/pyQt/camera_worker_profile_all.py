@@ -231,8 +231,10 @@ class CameraWorker(QThread):
         frame_shape = (config.FRAME_HEIGHT, config.FRAME_WIDTH, 3)
         self.vision_manager = VisionProcessManager(frame_shape=frame_shape)
         self.result_worker = VisionResultWorker(
-            vision_manager=self.vision_manager
+            vision_manager=self.vision_manager,
+            parent=self
         )
+        self._vision_resources_shutdown = False
 
         self.result_worker.status_changed.connect(self.status_changed.emit)
         self.result_worker.result_changed.connect(self.result_changed.emit)
@@ -520,18 +522,45 @@ class CameraWorker(QThread):
             pass
         return None
 
-    def stop(self):
-        self.running = False
+    def stop_camera_only(self):
+        """Cam Off용. 카메라 QThread만 멈추고 Vision/Hardware Process는 IDLE로 유지한다.
+
+        Cam Off마다 QThread/Queue/SharedMemory/PyQt wrapper를 파괴하지 않기 때문에
+        Qt event loop로 복귀하는 시점의 native cleanup 충돌 가능성을 줄인다.
+        다음 Cam On/Calibration에서 같은 CameraWorker를 다시 start()할 수 있다.
+        """
         self.pending_preview_start = False
         self.pending_calibration_start = False
         self.pending_measurement_start = False
 
-        # 1) Camera QThread가 capture 루프를 빠져나오고 camera.release()까지 끝내게 한다.
+        manager = self.vision_manager
+        result_worker = self.result_worker
+
+        if manager is not None:
+            manager.stop_analysis()
+            manager.send_main_state("CAMERA_OFF")
+
+        if result_worker is not None:
+            result_worker.stop_measurement_session()
+
+        self.running = False
+
         if self.isRunning():
             self.wait()
 
-        # 2) QThread가 종료된 다음, 호출한 Main thread에서 Vision/Result IPC를 정리한다.
+        self.mode = RunMode.PREVIEW
+        print("[CameraWorker] 카메라만 종료 - Vision/Hardware Process는 IDLE 유지")
+
+    def shutdown(self):
+        """앱 종료 전용. 카메라를 멈춘 뒤 모든 Vision/Hardware 자원을 정리한다."""
+        print("[SHUTDOWN] CameraWorker 전체 종료 시작")
+        self.stop_camera_only()
         self.shutdown_vision_resources()
+        print("[SHUTDOWN] CameraWorker 전체 종료 완료")
+
+    def stop(self):
+        # 기존 호출 호환용: stop()은 앱 전체 종료와 동일하게 처리한다.
+        self.shutdown()
 
     def release_resources(self, show_message=True):
         if self.camera is not None:
@@ -541,14 +570,21 @@ class CameraWorker(QThread):
         print("[SHUTDOWN] Camera resources released")
 
     def shutdown_vision_resources(self):
+        if self._vision_resources_shutdown:
+            return
+
         manager = self.vision_manager
         worker = self.result_worker
+
+        # 앱 종료 중에는 ResultWorker가 Main UI로 새 Qt signal을 보내지 않게 한다.
+        if worker is not None:
+            worker.blockSignals(True)
 
         # 생산자 Process를 먼저 멈춰 더 이상 Queue에 쓰지 않게 한다.
         if manager is not None:
             manager.stop()
 
-        # 그 다음 Queue consumer인 ResultWorker를 정지한다.
+        # 그 다음 Queue consumer QThread를 완전히 정지한다.
         if worker is not None:
             worker.stop()
 
@@ -556,5 +592,6 @@ class CameraWorker(QThread):
         if manager is not None:
             manager.close_queues()
 
-        self.result_worker = None
-        self.vision_manager = None
+        # 여기서 QThread/QObject Python wrapper를 즉시 파괴하지 않는다.
+        # CameraWorker(MainWindow의 child)가 Qt 종료 과정에서 안전하게 소멸하도록 유지한다.
+        self._vision_resources_shutdown = True

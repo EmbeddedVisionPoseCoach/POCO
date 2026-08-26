@@ -1,5 +1,6 @@
 import os
 import sys
+import faulthandler
 from pathlib import Path
 
 import platform
@@ -8,7 +9,7 @@ import subprocess
 import webbrowser
 
 from PyQt5 import uic
-from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtCore import Qt, QTimer, QCoreApplication, QEventLoop
 from PyQt5.QtGui import QPixmap
 from PyQt5.QtWidgets import QApplication, QMainWindow, QMessageBox
 
@@ -50,6 +51,8 @@ class MainWindow(QMainWindow):
         uic.loadUi(str(ui_path), self)
 
         self.camera_worker = None
+        self._camera_shutdown_in_progress = False
+        self._app_closing = False
         self.streamlit_process = None
         self.streamlit_port = 8501
 
@@ -149,10 +152,18 @@ class MainWindow(QMainWindow):
     # Worker
     # ---------------------------------------------------------
     def ensure_camera_worker(self):
-        if self.camera_worker is not None and self.camera_worker.isRunning():
-            return
+        # Cam Off에서는 worker/Process를 파괴하지 않고 카메라 QThread만 멈춘다.
+        # 따라서 기존 worker가 있으면 그대로 재사용한다.
+        if self.camera_worker is not None:
+            if self.camera_worker.isRunning():
+                return
 
-        self.camera_worker = CameraWorker()
+            if not getattr(self.camera_worker, "_vision_resources_shutdown", False):
+                self._camera_shutdown_in_progress = False
+                self.camera_worker.start()
+                return
+
+        self.camera_worker = CameraWorker(parent=self)
 
         self.camera_worker.frame_changed.connect(self.update_camera_view)
         self.camera_worker.status_changed.connect(self.on_status_changed)
@@ -164,87 +175,57 @@ class MainWindow(QMainWindow):
         self.camera_worker.hardware_changed.connect(self.on_hardware_changed)
         self.camera_worker.hardware_event_changed.connect(self.on_hardware_event_changed)
 
+        self._camera_shutdown_in_progress = False
         self.camera_worker.start()
 
-    def stop_camera_worker(self):
-        print("[SHUTDOWN] Main stop_camera_worker 시작")
-
+    def stop_camera_worker(self, full_shutdown=False):
         worker = self.camera_worker
-
         if worker is None:
             return
 
-        # 종료 중 추가 UI Signal 전달 방지
-        try:
-            worker.frame_changed.disconnect()
-        except Exception:
-            pass
+        self._camera_shutdown_in_progress = True
 
-        try:
-            worker.status_changed.disconnect()
-        except Exception:
-            pass
+        if full_shutdown:
+            print("[SHUTDOWN] Main -> CameraWorker 전체 종료")
+            # 앱 종료 단계에서는 새 worker signal을 막는다.
+            worker.blockSignals(True)
+            worker.shutdown()
+            # self.camera_worker = None 으로 즉시 파괴하지 않는다.
+            # MainWindow child로 유지해 Qt가 정상적인 객체 수명 순서로 정리하게 한다.
+            return
 
-        try:
-            worker.calibration_finished.disconnect()
-        except Exception:
-            pass
+        print("[CAM OFF] 카메라 QThread만 종료 시작")
+        worker.stop_camera_only()
 
-        try:
-            worker.measurement_started.disconnect()
-        except Exception:
-            pass
+        # stop() 동안 Main event loop에 쌓였던 queued signal/meta-call을
+        # worker 객체가 살아 있는 상태에서 한 번 처리한다. 각 slot은 아래 flag로 무시된다.
+        QCoreApplication.processEvents(QEventLoop.ExcludeUserInputEvents, 50)
 
-        try:
-            worker.result_changed.disconnect()
-        except Exception:
-            pass
-
-        try:
-            worker.pose_state_changed.disconnect()
-        except Exception:
-            pass
-
-        try:
-            worker.face_state_changed.disconnect()
-        except Exception:
-            pass
-
-        try:
-            worker.hardware_changed.disconnect()
-        except Exception:
-            pass
-
-        try:
-            worker.hardware_event_changed.disconnect()
-        except Exception:
-            pass
-
-        print("[SHUTDOWN] Signal disconnect 완료")
-
-        worker.stop()
-
-        print("[SHUTDOWN] worker.stop 완료")
-
-        self.camera_worker = None
-
-        print("[SHUTDOWN] camera_worker None 완료")
-
+        self._camera_shutdown_in_progress = False
+        print("[CAM OFF] 카메라 QThread 종료 완료 - Vision Process 유지")
 
     def on_pose_state_changed(self, state):
         """Pose Process -> Main Process 최신 landmark/feature/state 수신 지점."""
+        if self._camera_shutdown_in_progress or self._app_closing:
+            return
         self.latest_pose_state = state
 
     def on_face_state_changed(self, state):
         """Face Process -> Main Process 최신 landmark/feature/state 수신 지점."""
+        if self._camera_shutdown_in_progress or self._app_closing:
+            return
         self.latest_face_state = state
 
     def on_hardware_changed(self, state):
         """Hardware Process -> Main Process 최신 State 수신 지점."""
+        if self._camera_shutdown_in_progress or self._app_closing:
+            return
         self.latest_hardware_state = state
 
     def on_hardware_event_changed(self, event):
         """Hardware Process -> Main Process 순서 보장 Event 수신 지점."""
+        if self._camera_shutdown_in_progress or self._app_closing:
+            return
         self.latest_hardware_event = event
 
     def send_hardware_command(self, message):
@@ -334,6 +315,8 @@ class MainWindow(QMainWindow):
     # measurement
     # ------------------------
     def on_measurement_started(self, success, message):
+        if self._camera_shutdown_in_progress or self._app_closing:
+            return
         if success:
             self.btnCalibration.setEnabled(False)
             self.btnCalibrationStart.setEnabled(False)
@@ -359,6 +342,8 @@ class MainWindow(QMainWindow):
 
     
     def on_result_changed(self, result):
+        if self._camera_shutdown_in_progress or self._app_closing:
+            return
         posture_type = result.get("posture_type", "-")
         confidence = result.get("confidence", 0.0)
         fatigue_label = result.get("fatigue_label", "Normal")
@@ -423,6 +408,8 @@ class MainWindow(QMainWindow):
     # Worker Signals
     # ---------------------------------------------------------
     def update_camera_view(self, q_image):
+        if self._camera_shutdown_in_progress or self._app_closing:
+            return
         pixmap = QPixmap.fromImage(q_image)
 
         self.label.setPixmap(
@@ -435,9 +422,13 @@ class MainWindow(QMainWindow):
         )
 
     def on_status_changed(self, message):
+        if self._camera_shutdown_in_progress or self._app_closing:
+            return
         self.set_status(message)
 
     def on_calibration_finished(self, success, message):
+        if self._camera_shutdown_in_progress or self._app_closing:
+            return
         if success:
             QMessageBox.information(
                 self,
@@ -488,28 +479,23 @@ class MainWindow(QMainWindow):
     def set_status(self, message):
         print(message)
 
-        if hasattr(self, "labelStatus"):
+        if hasattr(self, "labelStatus") and not self._app_closing:
+            print("[STATUS] labelStatus.setText 호출 전")
             self.labelStatus.setText(message)
+            print("[STATUS] labelStatus.setText 호출 후")
 
     def closeEvent(self, event):
-
-        print("[SHUTDOWN] 12. closeEvent 진입")
-
-        self.stop_camera_worker()
-
-        print("[SHUTDOWN] 13. Camera 종료 처리 완료")
+        print("[SHUTDOWN] closeEvent 진입")
+        self._app_closing = True
+        self.stop_camera_worker(full_shutdown=True)
 
         if self.streamlit_process is not None:
             if self.streamlit_process.poll() is None:
                 self.streamlit_process.terminate()
 
-        print("[SHUTDOWN] 14. event.accept 호출")
-
+        print("[SHUTDOWN] closeEvent 종료")
         event.accept()
 
-
-        print("[SHUTDOWN] 15. closeEvent 종료")
-        
     # ---------------------------------------------------------
     # Settings
     # ---------------------------------------------------------
@@ -887,6 +873,9 @@ class MainWindow(QMainWindow):
 
 
 if __name__ == "__main__":
+    # native C/C++ 계층에서 Segmentation fault가 재발하면 Python stack을 stderr에 남긴다.
+    faulthandler.enable(all_threads=True)
+
     app = QApplication(sys.argv)
 
     window = MainWindow()
