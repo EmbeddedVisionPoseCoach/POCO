@@ -216,8 +216,8 @@ class CameraWorker(QThread):
                     continue
 
                 # 여기에 이제 하드웨어 제어가 들어가야함 아니면 별도의 스레드를 둬야할듯?
-                if self.hardware_init_requested:
-                    self._start_hardware_then_calibration()
+                # if self.hardware_init_requested:
+                #     self._start_hardware_then_calibration()
 
                 if frame.shape[:2] != (config.FRAME_HEIGHT, config.FRAME_WIDTH):
                     frame = cv2.resize(frame, (config.FRAME_WIDTH, config.FRAME_HEIGHT))
@@ -225,17 +225,18 @@ class CameraWorker(QThread):
                 frame_id += 1
                 timestamp_ns = time.perf_counter_ns()
 
-                pose_success, face_success = self.vision_manager.write_frame(
-                    frame,
-                    frame_id,
-                    timestamp_ns
-                )
+                # pose_success, face_success = self.vision_manager.write_frame(
+                #     frame,
+                #     frame_id,
+                #     timestamp_ns
+                # )
+                pose_success = self.vision_manager.write_frame(frame, frame_id, timestamp_ns)
 
                 if not pose_success:
                     self.emit_status_interval(f"Pose Ring Overrun 발생: Frame={frame_id}")
 
-                if not face_success:
-                    self.emit_status_interval(f"Face Ring Overrun 발생: Frame={frame_id}")
+                # if not face_success:
+                    # self.emit_status_interval(f"Face Ring Overrun 발생: Frame={frame_id}")
 
                 #허ㅘㅁ면에서 FPS 안보려면 여기 주석 ㄱ
                 fps_frame_count += 1
