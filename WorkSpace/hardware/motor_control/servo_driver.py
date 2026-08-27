@@ -51,9 +51,9 @@ except ModuleNotFoundError as package_error:
         sys.path.append(SDK_PATH)
 
     try:
-        from port_handler import PortHandler
-        from sms_sts import sms_sts
-        from scservo_def import COMM_SUCCESS
+        from scservo_sdk.port_handler import PortHandler
+        from scservo_sdk.sms_sts import sms_sts
+        from scservo_sdk.scservo_def import COMM_SUCCESS
     except ModuleNotFoundError as local_error:
         raise ModuleNotFoundError(
             "STServo SDK를 찾을 수 없습니다. "
