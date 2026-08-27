@@ -74,6 +74,10 @@ class MonitorMotorService:
         self.last_control_time = None
         self.last_command_time = 0.0
 
+        # Runtime 진단용. 실제 모터 명령 여부를 로그에서 바로 확인한다.
+        self._debug_last_control_active = False
+        self._debug_last_print_time = 0.0
+
         self.latest_state = self._empty_state()
 
     def _empty_state(self):
@@ -184,6 +188,20 @@ class MonitorMotorService:
 
             self.arm = factory(calibration_file=str(self.calibration_file))
 
+            # Serial port가 열린 것과 실제 Servo ID 3가 응답하는 것은 별개다.
+            # 실기 MotorController에서는 앱 시작 단계에서 반드시 Servo3 ping까지
+            # 통과시켜 ready를 보장한다. FakeController(self-test)는 driver가 없을 수 있다.
+            driver = getattr(self.arm, "driver", None)
+            if driver is not None and hasattr(driver, "ping"):
+                ping_result = driver.ping(MOTOR3_SERVO_ID)
+                if not isinstance(ping_result, dict) or not ping_result.get("success", False):
+                    raise RuntimeError(
+                        "Servo 3(wrist_flex) Ping 실패: "
+                        f"{ping_result}"
+                    )
+            elif self.controller_factory is None:
+                raise RuntimeError("Servo3 Ping API를 찾을 수 없습니다.")
+
             safe_min, safe_max = self.arm.calibration.get_safe_angle_range(MOTOR3_JOINT)
             self.motor3_safe_min_deg = float(safe_min)
             self.motor3_safe_max_deg = float(safe_max)
@@ -194,7 +212,7 @@ class MonitorMotorService:
 
             print(
                 "[MOTOR] 준비 완료 "
-                f"Servo3={MOTOR3_JOINT} "
+                f"Servo3={MOTOR3_JOINT}(ID={MOTOR3_SERVO_ID}, PING=OK) "
                 f"safe={self.motor3_safe_min_deg:+.2f}~{self.motor3_safe_max_deg:+.2f}deg "
                 f"max_speed={self.motor3_max_speed} / "
                 f"Servo4={MOTOR4_JOINT}=PASS"
@@ -296,6 +314,13 @@ class MonitorMotorService:
         if command_speed <= 0:
             self.motor3_last_command_speed = 0
             self.motor3_last_success = True
+            if now - self._debug_last_print_time >= 1.0:
+                self._debug_last_print_time = now
+                print(
+                    "[MOTOR3] HOLD(no packet) "
+                    f"pid_speed={correction_speed:+.3f}deg/s "
+                    f"deadband={self.pid_speed_deadband_deg_s:.3f}deg/s"
+                )
             return True
 
         if not self._ensure_motor3_target():
@@ -324,6 +349,16 @@ class MonitorMotorService:
             speed=command_speed,
             wait=False,
         )
+
+        if now - self._debug_last_print_time >= 0.5:
+            self._debug_last_print_time = now
+            print(
+                "[MOTOR3] CMD "
+                f"pid_speed={correction_speed:+.3f}deg/s "
+                f"target={next_target:+.2f}deg "
+                f"servo_speed={command_speed} "
+                f"success={bool(success)}"
+            )
 
         self.motor3_last_success = bool(success)
         self.motor3_last_command_speed = int(command_speed)
@@ -378,12 +413,29 @@ class MonitorMotorService:
         )
 
         if not can_control:
+            if self._debug_last_control_active:
+                print(
+                    "[MOTOR3] GIMBAL OFF "
+                    f"available={self.available} enabled={self.enabled} "
+                    f"config_enabled={self.motor3_config_enabled} "
+                    f"requested={bool(control_active)} imu_ready={imu_ready}"
+                )
+            self._debug_last_control_active = False
+
             # 측정이 꺼졌다가 다시 켜질 때 현재 실제 Servo 위치를 새 기준으로 잡는다.
             if not control_active:
                 self._reset_runtime_target()
 
             self.latest_state = self._build_state(control_active=False)
             return self.latest_state
+
+        if not self._debug_last_control_active:
+            print(
+                "[MOTOR3] GIMBAL ON "
+                f"pitch={float(imu_state.get('pitch_deg', 0.0)):+.2f}deg "
+                f"pid_speed={float(imu_state.get('correction_pitch_speed_deg_s', 0.0)):+.3f}deg/s"
+            )
+        self._debug_last_control_active = True
 
         if now - self.last_command_time >= self.command_interval:
             self.last_command_time = now

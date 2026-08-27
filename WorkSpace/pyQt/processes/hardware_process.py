@@ -543,8 +543,8 @@ def run_hardware_process(
                     print("[HardwareProcess] IMU Offset 중 IR LOST -> Calibration 취소")
 
                 elif (
-                    latest_imu_state.get("calibrated", False)
-                    and not latest_imu_state.get("calibrating", False)
+                    imu.calibrated
+                    and not imu.calibrating
                     and not calibration_ready_emitted
                 ):
                     calibration_ready_emitted = True
@@ -580,10 +580,14 @@ def run_hardware_process(
             # ==================================================
             # Gimbal: CALIBRATING + MEASURING only
             # ==================================================
+            # 제어 허용 여부는 Queue/state snapshot보다 실제 IMU Service의
+            # 세션 Calibration 상태를 우선한다. stale state로 Motor3가 너무 일찍
+            # 켜지는 것을 막는다.
             imu_ready = bool(
-                latest_imu_state.get("available", False)
-                and latest_imu_state.get("calibrated", False)
-                and not latest_imu_state.get("calibrating", False)
+                imu.available
+                and imu.calibrated
+                and not imu.calibrating
+                and latest_imu_state.get("available", False)
             )
             ir_gate = bool(
                 latest_ir_state.get("available", False)

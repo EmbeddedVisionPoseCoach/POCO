@@ -421,6 +421,27 @@ class ADXL345IMUService:
         self.filter_initialized = False
         self.last_update_time = None
 
+        # 중요: start_calibration() 직후 Hardware Process가 이전 latest_state를
+        # 다시 읽더라도 calibrated=True가 남지 않도록 즉시 상태를 갱신한다.
+        # 실제 첫 I2C sample 전까지도 "현재 Calibration 중" 상태가 보장된다.
+        state = dict(self.latest_state) if isinstance(self.latest_state, dict) else self._empty_state()
+        state.update({
+            "available": bool(self.available),
+            "calibrating": True,
+            "calibrated": False,
+            "calibration_remaining_sec": float(self.calibration_sec),
+            "calibration_sample_count": 0,
+            "pitch_deg": 0.0,
+            "roll_deg": 0.0,
+            "correction_pitch_deg": 0.0,
+            "correction_roll_deg": 0.0,
+            "correction_pitch_speed_deg_s": 0.0,
+            "correction_roll_speed_deg_s": 0.0,
+            "last_error": None,
+            "timestamp": time.time(),
+        })
+        self.latest_state = state
+
         print(f"[IMU] Offset Calibration 시작 ({self.calibration_sec:.1f}초)")
         return True
 
