@@ -171,7 +171,11 @@ class VisionResultWorker(QThread):
             event_type = event.get("type", "") if isinstance(event, dict) else str(event)
 
             if event_type == "HARDWARE_READY":
-                self.status_changed.emit("Hardware Process IPC 준비 완료")
+                self.status_changed.emit(
+                    event.get("message", "Hardware Process 준비 완료")
+                    if isinstance(event, dict)
+                    else "Hardware Process 준비 완료"
+                )
             elif event_type == "HARDWARE_STOPPED":
                 self.status_changed.emit("Hardware Process 종료")
 

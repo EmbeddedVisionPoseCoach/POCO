@@ -1,4 +1,5 @@
 import os
+import copy
 import sys
 import faulthandler
 from pathlib import Path
@@ -20,6 +21,8 @@ import modules.config as config
 from camera_worker_profile_all import CameraWorker
 from managers.vision_process_manager_profile import PROFILE_MODE
 from modules.app_settings import SettingsManager, AlarmSettings
+from services.hardware_config_service import HardwareConfigService
+from services.hardware_state_store import get_hardware_runtime_state_store
 
 import warnings
 
@@ -60,6 +63,13 @@ class MainWindow(QMainWindow):
         self.settings_manager = SettingsManager(
             ROOT_DIR / "data" / "settings" / "alarm_settings.json"
         )
+
+        # Hardware 제어 설정(JSON)과 Runtime Sensor State는 성격이 다르므로 분리한다.
+        # - ConfigService: PID/LPF/Deadband/IR 설정 + 마지막 IMU Offset 기록
+        # - StateStore: IR/IMU/Motor의 실시간 최신값(메모리 only)
+        self.hardware_config_service = HardwareConfigService()
+        self.hardware_state_store = get_hardware_runtime_state_store()
+        self.latest_hardware_config = self.hardware_config_service.load()
 
         # Vision / Hardware는 별도 Process로 실행된다.
         # Main Process는 UI 표시용 최신 상태만 보관한다.
@@ -217,16 +227,30 @@ class MainWindow(QMainWindow):
         self.latest_face_state = state
 
     def on_hardware_changed(self, state):
-        """Hardware Process -> Main Process 최신 State 수신 지점."""
+        """Hardware Process -> Main 최신 State. IR/IMU/Motor 공용 저장소도 갱신한다."""
         if self._camera_shutdown_in_progress or self._app_closing:
             return
         self.latest_hardware_state = state
+        self.hardware_state_store.update(state)
 
     def on_hardware_event_changed(self, event):
-        """Hardware Process -> Main Process 순서 보장 Event 수신 지점."""
+        """Hardware Process -> Main 순서 보장 Event/ACK 수신 지점."""
         if self._camera_shutdown_in_progress or self._app_closing:
             return
         self.latest_hardware_event = event
+
+        if isinstance(event, dict):
+            event_type = str(event.get("type", "")).upper()
+            if event_type in (
+                "HARDWARE_CONFIG_STATE",
+                "HARDWARE_CONFIG_UPDATED",
+                "HARDWARE_CONFIG_RELOADED",
+                "HARDWARE_CONFIG_RESET",
+                "IMU_OFFSET_SAVED",
+            ):
+                config_data = event.get("config")
+                if isinstance(config_data, dict):
+                    self.latest_hardware_config = config_data
 
     def send_hardware_command(self, message):
         """Main Process -> Hardware Process IPC 전송 지점."""
@@ -238,6 +262,72 @@ class MainWindow(QMainWindow):
             return False
 
         return manager.send_hardware_command(message)
+
+    # ---------------------------------------------------------
+    # Hardware Runtime State Access
+    # ---------------------------------------------------------
+    def get_latest_hardware_state(self):
+        return self.hardware_state_store.get_hardware_state()
+
+    def get_latest_ir_state(self):
+        """UI/알림/리포트 등 Main Process 어디서든 최신 IR 상태를 조회한다."""
+        return self.hardware_state_store.get_ir_state()
+
+    def is_ir_detected(self, require_stable=False):
+        return self.hardware_state_store.is_ir_detected(require_stable=require_stable)
+
+    def get_latest_imu_state(self):
+        return self.hardware_state_store.get_imu_state()
+
+    def get_latest_motor_state(self):
+        return self.hardware_state_store.get_motor_state()
+
+    # ---------------------------------------------------------
+    # Hardware Config API - 향후 PyQt PID/LPF 설정 UI에서 사용
+    # ---------------------------------------------------------
+    def get_hardware_config(self, reload_from_disk=False):
+        if reload_from_disk:
+            self.latest_hardware_config = self.hardware_config_service.reload()
+        return copy.deepcopy(self.latest_hardware_config)
+
+    def save_hardware_control_config(self, control_patch):
+        """
+        실행 중이면 Hardware Process가 JSON write owner가 된다.
+        Worker가 아직 없으면 Main에서 직접 저장하고 다음 Hardware 시작 시 적용한다.
+        """
+        if not isinstance(control_patch, dict):
+            raise TypeError("control_patch는 dict여야 합니다.")
+
+        worker = self.camera_worker
+        manager = getattr(worker, "vision_manager", None) if worker is not None else None
+        resources_alive = bool(
+            worker is not None
+            and manager is not None
+            and not getattr(worker, "_vision_resources_shutdown", False)
+        )
+
+        if resources_alive:
+            return self.send_hardware_command({
+                "type": "UPDATE_CONFIG",
+                "control": control_patch,
+            })
+
+        self.latest_hardware_config = self.hardware_config_service.update_control(
+            control_patch
+        )
+        return True
+
+    def request_hardware_config(self):
+        if self.send_hardware_command({"type": "GET_CONFIG"}):
+            return True
+        self.latest_hardware_config = self.hardware_config_service.reload()
+        return False
+
+    def reload_hardware_config(self):
+        if self.send_hardware_command({"type": "RELOAD_CONFIG"}):
+            return True
+        self.latest_hardware_config = self.hardware_config_service.reload()
+        return False
 
     # ---------------------------------------------------------
     # Button Events

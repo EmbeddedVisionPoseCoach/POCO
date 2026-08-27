@@ -224,6 +224,7 @@ class CameraWorker(QThread):
         self.pending_preview_start = False
         self.pending_calibration_start = False
         self.pending_measurement_start = False
+        self.hardware_calibration_preparing = False
 
         self.last_status_emit_time = 0.0
         self.status_emit_interval = 0.4
@@ -244,6 +245,9 @@ class CameraWorker(QThread):
         self.result_worker.pose_state_changed.connect(self.pose_state_changed.emit)
         self.result_worker.face_state_changed.connect(self.face_state_changed.emit)
         self.result_worker.hardware_changed.connect(self.hardware_changed.emit)
+        # Hardware calibration handshake는 CameraWorker가 먼저 처리하고
+        # 동일 event를 Main UI에도 그대로 전달한다.
+        self.result_worker.hardware_event_changed.connect(self._on_hardware_event)
         self.result_worker.hardware_event_changed.connect(self.hardware_event_changed.emit)
 
         self.vision_manager.start()
@@ -386,13 +390,18 @@ class CameraWorker(QThread):
             self.pending_preview_start = True
             self.status_changed.emit("카메라 준비 중입니다.")
             return
+
+        if self.hardware_calibration_preparing:
+            self.vision_manager.send_hardware_command({"type": "CANCEL_CALIBRATION_PREPARE"})
+            self.hardware_calibration_preparing = False
+
         self.mode = RunMode.PREVIEW
         self.vision_manager.stop_analysis()
         self.vision_manager.send_main_state("PREVIEW")
         self.status_changed.emit("프리뷰 모드입니다. 바른 자세를 준비해주세요.")
 
     def start_calibration(self):
-        """Calibration 버튼을 눌렀을 때만 새 baseline을 측정/저장한다."""
+        """IR -> IMU Offset 완료 후에만 Pose/Face baseline Calibration을 시작한다."""
         if not self.running:
             self.pending_calibration_start = True
             self.status_changed.emit("카메라 준비 중입니다. 준비되면 초기 측정을 시작합니다.")
@@ -403,6 +412,34 @@ class CameraWorker(QThread):
             self.status_changed.emit("AI Process 준비 중입니다.")
             return
 
+        if self.hardware_calibration_preparing or self.mode == RunMode.CALIBRATING:
+            return
+
+        # 아직 Pose baseline 수집을 시작하지 않는다.
+        # 먼저 Hardware Process가 IR 사용자 감지 -> IMU Offset을 완료해야 한다.
+        self.hardware_calibration_preparing = True
+        self.mode = RunMode.PREVIEW
+        self.vision_manager.stop_analysis()
+        self.vision_manager.send_main_state("CALIBRATION_PRECHECK")
+
+        sent = self.vision_manager.send_hardware_command({
+            "type": "PREPARE_CALIBRATION"
+        })
+
+        if not sent:
+            self.hardware_calibration_preparing = False
+            self.vision_manager.send_main_state("PREVIEW")
+            message = "Hardware Calibration 준비 명령을 전달하지 못했습니다."
+            self.status_changed.emit(message)
+            self.calibration_finished.emit(False, message)
+            return
+
+        self.status_changed.emit(
+            "Calibration 준비: IR 사용자 감지를 확인한 뒤 IMU Offset을 측정합니다."
+        )
+
+    def _begin_vision_calibration(self):
+        """Hardware IR/IMU 준비 완료 ACK 후 실제 MediaPipe baseline 수집 시작."""
         self.result_worker.reset_calibration()
         self.vision_manager.start_calibration()
         self.mode = RunMode.CALIBRATING
@@ -414,11 +451,71 @@ class CameraWorker(QThread):
             targets.append("Face")
 
         self.status_changed.emit(
-            f"{' / '.join(targets)} 기준값 측정을 시작합니다. "
-            f"{config.CALIBRATION_TIME}초 동안 기준 자세를 유지해주세요."
+            f"IR/IMU 준비 완료. {' / '.join(targets)} 기준값 측정을 시작합니다. "
+            f"{config.CALIBRATION_TIME}초 동안 IMU/Motor3 짐벌 제어와 함께 기준 자세를 유지해주세요."
         )
 
+    def _on_hardware_event(self, event):
+        if not isinstance(event, dict):
+            return
+
+        event_type = str(event.get("type", "")).upper()
+        message = event.get("message", "")
+
+        if event_type == "HARDWARE_CALIBRATION_PRECHECK_STARTED":
+            if self.hardware_calibration_preparing and message:
+                self.status_changed.emit(message)
+            return
+
+        if event_type == "IR_CHECK_PASSED":
+            if self.hardware_calibration_preparing and message:
+                self.status_changed.emit(message)
+            return
+
+        if event_type == "IMU_OFFSET_CALIBRATION_STARTED":
+            if self.hardware_calibration_preparing and message:
+                self.status_changed.emit(message)
+            return
+
+        if event_type == "HARDWARE_CALIBRATION_READY":
+            if not self.hardware_calibration_preparing:
+                return
+
+            self.hardware_calibration_preparing = False
+            success = bool(event.get("success", False))
+
+            if not success:
+                self.mode = RunMode.PREVIEW
+                self.vision_manager.send_main_state("PREVIEW")
+                fail_message = message or "IR/IMU Calibration 준비에 실패했습니다."
+                self.status_changed.emit(fail_message)
+                self.calibration_finished.emit(False, fail_message)
+                return
+
+            self._begin_vision_calibration()
+            return
+
+        if event_type == "IR_LOST_DURING_CALIBRATION":
+            if self.mode != RunMode.CALIBRATING:
+                return
+
+            # 사용자가 사라진 상태의 baseline은 저장하지 않는다.
+            self.vision_manager.stop_analysis()
+            self.result_worker.reset_calibration()
+            self.mode = RunMode.PREVIEW
+            self.vision_manager.send_main_state("PREVIEW")
+            fail_message = message or "Calibration 중 IR 사용자 감지가 끊겼습니다."
+            self.status_changed.emit(fail_message)
+            self.calibration_finished.emit(False, fail_message)
+            return
+
+        if event_type == "IR_LOST_DURING_MEASUREMENT":
+            if self.mode == RunMode.MEASURING and message:
+                # Measurement 자체는 유지하되 Motor3 짐벌 패킷만 Hardware에서 차단된다.
+                self.status_changed.emit(message)
+
     def _on_calibration_finished(self, success, message):
+        self.hardware_calibration_preparing = False
         self.mode = RunMode.PREVIEW
         self.vision_manager.send_main_state("PREVIEW")
         self.calibration_finished.emit(success, message)
@@ -431,6 +528,35 @@ class CameraWorker(QThread):
         if not self.result_worker.is_ready:
             self.pending_measurement_start = True
             self.status_changed.emit("AI Process 준비 중입니다.")
+            return
+
+        # Measurement의 짐벌 제어는 현재 실행 세션의 IMU Offset을 그대로 사용한다.
+        # 따라서 IR -> IMU Offset을 거친 Calibration을 한 번도 하지 않았다면
+        # 저장된 Pose baseline만으로 측정을 시작하지 않는다.
+        hardware_state = getattr(self.result_worker, "latest_hardware_state", None)
+        imu_state = hardware_state.get("imu", {}) if isinstance(hardware_state, dict) else {}
+        motor_state = hardware_state.get("motor", {}) if isinstance(hardware_state, dict) else {}
+
+        imu_ready = bool(
+            imu_state.get("available", False)
+            and imu_state.get("calibrated", False)
+            and not imu_state.get("calibrating", False)
+        )
+        motor3_state = motor_state.get("motor3", {}) if isinstance(motor_state, dict) else {}
+        motor_ready = bool(
+            motor_state.get("available", False)
+            and motor_state.get("enabled", False)
+            and motor_state.get("motor3_config_enabled", True)
+            and motor3_state.get("ready", False)
+        )
+
+        if not imu_ready or not motor_ready:
+            message = (
+                "현재 실행 세션의 IR/IMU/Motor3 준비가 완료되지 않았습니다. "
+                "먼저 초기값 준비 -> 초기값 측정을 진행해 IR 확인과 IMU Offset을 완료해주세요."
+            )
+            self.measurement_started.emit(False, message)
+            self.status_changed.emit(message)
             return
 
         missing = []
@@ -534,6 +660,10 @@ class CameraWorker(QThread):
         self.pending_measurement_start = False
 
         manager = self.vision_manager
+        if self.hardware_calibration_preparing and manager is not None:
+            manager.send_hardware_command({"type": "CANCEL_CALIBRATION_PREPARE"})
+        self.hardware_calibration_preparing = False
+
         result_worker = self.result_worker
 
         if manager is not None:

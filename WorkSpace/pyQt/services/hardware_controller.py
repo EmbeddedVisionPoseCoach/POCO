@@ -1,6 +1,7 @@
 """Hardware IPC facade.
 
-실제 Serial / Sensor / Motor / Alert 로직은 없다.
+실제 IMU 로직은 Hardware Process가 담당하며, 이 파일은 Main <-> Hardware IPC facade만 담당한다.
+Motor / Serial / Alert 제어는 아직 없다.
 필요하면 Main Process에서 Hardware Process로 State 또는 Event/Command를 보내기 위한
 얇은 IPC 인터페이스로만 사용한다.
 
