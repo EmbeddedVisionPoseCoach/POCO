@@ -42,10 +42,16 @@ if SDK_PATH not in sys.path:
     sys.path.append(SDK_PATH)
 
 
-# 현재 프로젝트에서 기존부터 사용한 SDK import 방식 유지
-from port_handler import PortHandler
-from sms_sts import sms_sts
-from scservo_def import COMM_SUCCESS
+try:
+    from scservo_sdk.port_handler import PortHandler
+    from scservo_sdk.sms_sts import sms_sts
+    from scservo_sdk.scservo_def import COMM_SUCCESS
+except ModuleNotFoundError as local_error:
+    raise ModuleNotFoundError(
+        "STServo SDK를 찾을 수 없습니다. "
+        "가상환경에서 'pip install ftservo-python-sdk'를 실행하거나 "
+        f"로컬 SDK를 '{SDK_PATH}'에 배치하세요."
+    ) from local_error
 
 
 # ============================================================
