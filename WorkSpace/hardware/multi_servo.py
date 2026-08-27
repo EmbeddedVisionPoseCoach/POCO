@@ -8,9 +8,12 @@ sdk_path = os.path.abspath("./STServo_Python/stservo-env/scservo_sdk")
 if sdk_path not in sys.path:
     sys.path.append(sdk_path)
 
-from port_handler import PortHandler
-from sms_sts import sms_sts
-from scservo_def import *
+try:
+    from scservo_sdk import *
+except ModuleNotFoundError:
+    from port_handler import PortHandler
+    from sms_sts import sms_sts
+    from scservo_def import *
 
 DEVICENAME = '/dev/ttyACM0'
 BAUDRATE = 1000000

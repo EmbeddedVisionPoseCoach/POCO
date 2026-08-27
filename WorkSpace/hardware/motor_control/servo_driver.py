@@ -37,27 +37,29 @@ from .config import (
 
 
 # ============================================================
-# 1. STServo SDK 경로
+# 1. STServo SDK
 # ============================================================
-
-if SDK_PATH not in sys.path:
-
-    sys.path.append(
-        SDK_PATH
-    )
-
-
-# ============================================================
-# 2. STServo SDK
-# ============================================================
+#
+# 우선 PyPI 패키지(ftservo-python-sdk)의 scservo_sdk를 사용한다.
+# 설치되어 있지 않은 경우 기존 프로젝트 로컬 SDK 폴더를 fallback으로 사용한다.
 
 try:
-    from stservo_env.scservo_sdk import PortHandler, sms_sts
-    from stservo_env.scservo_sdk.scservo_def import COMM_SUCCESS
-except ModuleNotFoundError :
-    from hardware.stservo_env.scservo_sdk.port_handler import PortHandler
-    from hardware.stservo_env.scservo_sdk.sms_sts import sms_sts
-    from hardware.stservo_env.scservo_sdk.scservo_def import COMM_SUCCESS
+    from scservo_sdk import PortHandler, sms_sts
+    from scservo_sdk.scservo_def import COMM_SUCCESS
+except ModuleNotFoundError as package_error:
+    if SDK_PATH not in sys.path:
+        sys.path.append(SDK_PATH)
+
+    try:
+        from port_handler import PortHandler
+        from sms_sts import sms_sts
+        from scservo_def import COMM_SUCCESS
+    except ModuleNotFoundError as local_error:
+        raise ModuleNotFoundError(
+            "STServo SDK를 찾을 수 없습니다. "
+            "가상환경에서 'pip install ftservo-python-sdk'를 실행하거나 "
+            f"로컬 SDK를 '{SDK_PATH}'에 배치하세요."
+        ) from local_error
 
 
 # ============================================================

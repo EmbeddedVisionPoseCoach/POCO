@@ -158,10 +158,13 @@ if sdk_path not in sys.path:
 # ============================================================
 # 2. STServo SDK
 # ============================================================
-
-from port_handler import PortHandler
-from sms_sts import sms_sts
-from scservo_def import *
+# PyPI ftservo-python-sdk 우선, 기존 로컬 SDK 경로 fallback.
+try:
+    from scservo_sdk import *
+except ModuleNotFoundError:
+    from port_handler import PortHandler
+    from sms_sts import sms_sts
+    from scservo_def import *
 
 
 # ============================================================
