@@ -51,9 +51,13 @@ if SDK_PATH not in sys.path:
 # 2. STServo SDK
 # ============================================================
 
-from hardware.stservo_env.scservo_sdk.port_handler import PortHandler
-from hardware.stservo_env.scservo_sdk.sms_sts import sms_sts
-from hardware.stservo_env.scservo_sdk.scservo_def import COMM_SUCCESS
+try:
+    from stservo_env.scservo_sdk import PortHandler, sms_sts
+    from stservo_env.scservo_sdk.scservo_def import COMM_SUCCESS
+except ModuleNotFoundError :
+    from hardware.stservo_env.scservo_sdk.port_handler import PortHandler
+    from hardware.stservo_env.scservo_sdk.sms_sts import sms_sts
+    from hardware.stservo_env.scservo_sdk.scservo_def import COMM_SUCCESS
 
 
 # ============================================================

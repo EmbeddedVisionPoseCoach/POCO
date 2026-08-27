@@ -5,7 +5,11 @@ from pathlib import Path
 
 # pyQt/services/motor_service.py -> WorkSpace
 WORKSPACE_DIR = Path(__file__).resolve().parents[2]
-DEFAULT_CALIBRATION_FILE = WORKSPACE_DIR / "servo_calibration_result.json"
+HARDWARE_DIR = WORKSPACE_DIR / "hardware"
+
+DEFAULT_CALIBRATION_FILE = (
+    HARDWARE_DIR / "servo_calibration_result.json"
+)
 
 MOTOR3_SERVO_ID = 3
 MOTOR3_JOINT = "wrist_flex"
@@ -23,6 +27,8 @@ MOTOR_PID_SPEED_DEADBAND_DEG_S = 0.25
 # IMU Pitch 보정 +방향과 wrist_flex 팀원용 +방향(위)의 관계.
 # 실제 ADXL345 장착 방향 테스트에서 반대로 움직이면 -1.0으로 바꾼다.
 MOTOR3_DIRECTION_SIGN = +1.0
+
+
 
 
 class MonitorMotorService:
@@ -176,7 +182,7 @@ class MonitorMotorService:
             self._load_motor3_calibration_metadata()
 
             if self.controller_factory is None:
-                from motor_control import MotorController
+                from hardware.motor_control import MotorController
                 factory = MotorController
             else:
                 factory = self.controller_factory
