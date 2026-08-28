@@ -452,7 +452,7 @@ class CameraWorker(QThread):
 
         self.status_changed.emit(
             f"IR/IMU 준비 완료. {' / '.join(targets)} 기준값 측정을 시작합니다. "
-            f"{config.CALIBRATION_TIME}초 동안 IMU/Motor3 짐벌 제어와 함께 기준 자세를 유지해주세요."
+            f"{config.CALIBRATION_TIME}초 동안 IMU/Motor3/4 짐벌 제어와 함께 기준 자세를 유지해주세요."
         )
 
     def _on_hardware_event(self, event):
@@ -511,7 +511,7 @@ class CameraWorker(QThread):
 
         if event_type == "IR_LOST_DURING_MEASUREMENT":
             if self.mode == RunMode.MEASURING and message:
-                # Measurement 자체는 유지하되 Motor3 짐벌 패킷만 Hardware에서 차단된다.
+                # Measurement 자체는 유지하되 Motor3/4 짐벌 패킷만 Hardware에서 차단된다.
                 self.status_changed.emit(message)
 
     def _on_calibration_finished(self, success, message):
@@ -542,17 +542,15 @@ class CameraWorker(QThread):
             and imu_state.get("calibrated", False)
             and not imu_state.get("calibrating", False)
         )
-        motor3_state = motor_state.get("motor3", {}) if isinstance(motor_state, dict) else {}
         motor_ready = bool(
             motor_state.get("available", False)
             and motor_state.get("enabled", False)
-            and motor_state.get("motor3_config_enabled", True)
-            and motor3_state.get("ready", False)
+            and motor_state.get("ready", False)
         )
 
         if not imu_ready or not motor_ready:
             message = (
-                "현재 실행 세션의 IR/IMU/Motor3 준비가 완료되지 않았습니다. "
+                "현재 실행 세션의 IR/IMU/Motor3/4 준비가 완료되지 않았습니다. "
                 "먼저 초기값 준비 -> 초기값 측정을 진행해 IR 확인과 IMU Offset을 완료해주세요."
             )
             self.measurement_started.emit(False, message)

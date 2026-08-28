@@ -6,18 +6,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from services.hardware_constants import (
-    IMU_ADDRESS,
-    IMU_BUS,
-    IMU_CALIBRATION_SEC,
     IMU_DEADBAND_DEG,
     IMU_LPF_ALPHA,
-    IMU_SAMPLE_HZ,
-    IR_ACTIVE_LOW,
-    IR_CHECK_TIMEOUT_SEC,
-    IR_LOST_GRACE_SEC,
-    IR_PIN,
-    IR_SAMPLE_HZ,
-    IR_STABLE_DETECT_SEC,
     PID_DERIVATIVE_LPF_ALPHA,
     PID_INTEGRAL_LIMIT_RAD_SEC,
     PID_OUTPUT_LIMIT_DEG_S,
@@ -35,8 +25,10 @@ WORKSPACE_DIR = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG_PATH = WORKSPACE_DIR / "data" / "settings" / "hardware_control.json"
 
 
+# 하드웨어 배선/통신 기본값(IR pin, I2C bus/address, sample Hz 등)은
+# hardware_constants.py에만 둔다. JSON에는 PyQt에서 실제로 조절할 값만 저장한다.
 DEFAULT_HARDWARE_CONFIG = {
-    "version": 1,
+    "version": 3,
     "calibration": {
         "imu": {
             "pitch_offset_deg": 0.0,
@@ -46,33 +38,13 @@ DEFAULT_HARDWARE_CONFIG = {
         }
     },
     "control": {
-        "ir": {
-            "pin": IR_PIN,
-            "active_low": IR_ACTIVE_LOW,
-            "sample_hz": IR_SAMPLE_HZ,
-            "stable_detect_sec": IR_STABLE_DETECT_SEC,
-            "lost_grace_sec": IR_LOST_GRACE_SEC,
-            "check_timeout_sec": IR_CHECK_TIMEOUT_SEC,
-        },
         "imu": {
-            "bus": IMU_BUS,
-            "address": IMU_ADDRESS,
-            "sample_hz": IMU_SAMPLE_HZ,
-            "calibration_sec": IMU_CALIBRATION_SEC,
             "lpf_alpha": IMU_LPF_ALPHA,
             "deadband_deg": IMU_DEADBAND_DEG,
         },
         "pid": {
-            "pitch": {
-                "kp": PITCH_KP,
-                "ki": PITCH_KI,
-                "kd": PITCH_KD,
-            },
-            "roll": {
-                "kp": ROLL_KP,
-                "ki": ROLL_KI,
-                "kd": ROLL_KD,
-            },
+            "pitch": {"kp": PITCH_KP, "ki": PITCH_KI, "kd": PITCH_KD},
+            "roll": {"kp": ROLL_KP, "ki": ROLL_KI, "kd": ROLL_KD},
             "output_limit_deg_s": PID_OUTPUT_LIMIT_DEG_S,
             "integral_limit_rad_sec": PID_INTEGRAL_LIMIT_RAD_SEC,
             "derivative_lpf_alpha": PID_DERIVATIVE_LPF_ALPHA,
@@ -86,8 +58,8 @@ DEFAULT_HARDWARE_CONFIG = {
                 "direction_sign": 1.0,
             },
             "motor4": {
-                "enabled": False,
-                "pass": True,
+                "enabled": True,
+                "direction_sign": 1.0,
             },
         },
     },
@@ -107,15 +79,53 @@ def _clamp(value, minimum, maximum):
     return max(minimum, min(float(value), maximum))
 
 
-class HardwareConfigService:
-    """Hardware 제어/Calibration JSON의 단일 관리 계층.
+def _normalize_legacy_loaded(data):
+    """예전 JSON을 읽어도 새 구조로 자동 정리한다.
 
-    원칙
-      - PID/LPF/Deadband/IR/Motor 제어 설정과 IMU Offset 기록을 한 파일에 저장한다.
-      - Runtime sensor 값(IR detected 등)은 저장하지 않는다.
-      - 실행 중에는 Hardware Process가 write owner가 되고, PyQt는 IPC로 update를 요청한다.
-      - save()는 temporary file + os.replace()로 원자적으로 교체한다.
-      - 새 설정 키가 추가돼도 기존 JSON을 유지할 수 있도록 deep merge한다.
+    예전 control.ir 및 control.imu의 bus/address/sample_hz/calibration_sec는
+    이제 코드 상수가 기준이므로 버린다. lpf/deadband만 유지한다.
+    """
+    if not isinstance(data, dict):
+        return {}
+
+    data = copy.deepcopy(data)
+    control = data.get("control")
+    if not isinstance(control, dict):
+        return data
+
+    old_imu = control.get("imu")
+    if isinstance(old_imu, dict):
+        control["imu"] = {
+            key: old_imu[key]
+            for key in ("lpf_alpha", "deadband_deg")
+            if key in old_imu
+        }
+
+    control.pop("ir", None)
+
+    # v2까지 Motor4는 미구현(pass) 상태였으므로, v3에서는 실제 제어가
+    # 기본 활성화되도록 자동 마이그레이션한다. 사용자가 v3 이후 직접
+    # disabled로 저장한 값은 그대로 존중한다.
+    version = int(data.get("version", 0) or 0)
+    motor = control.get("motor")
+    if isinstance(motor, dict):
+        motor4 = motor.get("motor4")
+        if isinstance(motor4, dict):
+            if version < 3 or motor4.get("pass") is True:
+                motor4["enabled"] = True
+            motor4.pop("pass", None)
+            motor4.setdefault("direction_sign", 1.0)
+
+    return data
+
+
+class HardwareConfigService:
+    """PID/Filter/Motor tuning + IMU Calibration 기록 전용 JSON 관리자.
+
+    구분
+      - hardware_constants.py: 배선/통신/샘플링 등 개발자 고정값
+      - hardware_control.json: PyQt에서 변경 가능한 튜닝값
+      - servo_calibration_result.json: Servo 기계적 Calibration
     """
 
     def __init__(self, path=DEFAULT_CONFIG_PATH):
@@ -137,6 +147,7 @@ class HardwareConfigService:
         with self.path.open("r", encoding="utf-8") as file:
             loaded = json.load(file)
 
+        loaded = _normalize_legacy_loaded(loaded)
         data = self.create_default()
         if isinstance(loaded, dict):
             _deep_merge(data, loaded)
@@ -191,7 +202,7 @@ class HardwareConfigService:
         if not isinstance(patch, dict):
             raise TypeError("Hardware config patch는 dict여야 합니다.")
         data = self.load()
-        _deep_merge(data, patch)
+        _deep_merge(data, _normalize_legacy_loaded(patch))
         return self.save(data)
 
     def update_control(self, patch):
@@ -228,7 +239,7 @@ class HardwareConfigService:
         if not isinstance(data, dict):
             raise ValueError("Hardware config root는 object여야 합니다.")
 
-        data["version"] = int(data.get("version", 1))
+        data["version"] = 3
 
         calibration = data.setdefault("calibration", {}).setdefault("imu", {})
         calibration["pitch_offset_deg"] = float(calibration.get("pitch_offset_deg", 0.0))
@@ -238,22 +249,13 @@ class HardwareConfigService:
         calibration["calibrated_at"] = calibrated_at if calibrated_at else None
 
         control = data.setdefault("control", {})
-
-        ir = control.setdefault("ir", {})
-        ir["pin"] = int(ir.get("pin", IR_PIN))
-        ir["active_low"] = bool(ir.get("active_low", IR_ACTIVE_LOW))
-        ir["sample_hz"] = max(1.0, float(ir.get("sample_hz", IR_SAMPLE_HZ)))
-        ir["stable_detect_sec"] = max(0.0, float(ir.get("stable_detect_sec", IR_STABLE_DETECT_SEC)))
-        ir["lost_grace_sec"] = max(0.0, float(ir.get("lost_grace_sec", IR_LOST_GRACE_SEC)))
-        ir["check_timeout_sec"] = max(0.5, float(ir.get("check_timeout_sec", IR_CHECK_TIMEOUT_SEC)))
+        control.pop("ir", None)
 
         imu = control.setdefault("imu", {})
-        imu["bus"] = int(imu.get("bus", IMU_BUS))
-        imu["address"] = int(imu.get("address", IMU_ADDRESS))
-        imu["sample_hz"] = max(1.0, float(imu.get("sample_hz", IMU_SAMPLE_HZ)))
-        imu["calibration_sec"] = max(0.1, float(imu.get("calibration_sec", IMU_CALIBRATION_SEC)))
         imu["lpf_alpha"] = _clamp(imu.get("lpf_alpha", IMU_LPF_ALPHA), 0.0, 1.0)
         imu["deadband_deg"] = max(0.0, float(imu.get("deadband_deg", IMU_DEADBAND_DEG)))
+        for key in ("bus", "address", "sample_hz", "calibration_sec"):
+            imu.pop(key, None)
 
         pid = control.setdefault("pid", {})
         for axis, defaults in (
@@ -265,7 +267,9 @@ class HardwareConfigService:
             axis_cfg["ki"] = float(axis_cfg.get("ki", defaults["ki"]))
             axis_cfg["kd"] = float(axis_cfg.get("kd", defaults["kd"]))
 
-        pid["output_limit_deg_s"] = max(0.1, float(pid.get("output_limit_deg_s", PID_OUTPUT_LIMIT_DEG_S)))
+        pid["output_limit_deg_s"] = max(
+            0.1, float(pid.get("output_limit_deg_s", PID_OUTPUT_LIMIT_DEG_S))
+        )
         pid["integral_limit_rad_sec"] = max(
             0.0, float(pid.get("integral_limit_rad_sec", PID_INTEGRAL_LIMIT_RAD_SEC))
         )
@@ -288,6 +292,7 @@ class HardwareConfigService:
         motor3["direction_sign"] = 1.0 if direction_sign >= 0.0 else -1.0
 
         motor4 = motor.setdefault("motor4", {})
-        motor4["enabled"] = bool(motor4.get("enabled", False))
-        # 현재 구현은 무조건 pass. UI에서 true를 저장해도 실제 제어는 아직 활성화하지 않는다.
-        motor4["pass"] = True
+        motor4["enabled"] = bool(motor4.get("enabled", True))
+        direction_sign = float(motor4.get("direction_sign", 1.0))
+        motor4["direction_sign"] = 1.0 if direction_sign >= 0.0 else -1.0
+        motor4.pop("pass", None)
