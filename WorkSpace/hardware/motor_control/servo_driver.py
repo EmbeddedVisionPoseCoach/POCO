@@ -39,19 +39,27 @@ from .config import (
 # ============================================================
 
 if SDK_PATH not in sys.path:
-    sys.path.append(SDK_PATH)
+    sys.path.insert(0, SDK_PATH)
 
 
 try:
-    from scservo_sdk.port_handler import PortHandler
-    from scservo_sdk.sms_sts import sms_sts
-    from scservo_sdk.scservo_def import COMM_SUCCESS
+    # 로컬 STServo SDK는 내부에서 `from scservo_def import *` 같은
+    # bare import를 사용하므로 scservo_sdk 폴더 자체를 sys.path에 넣는다.
+    from port_handler import PortHandler
+    from sms_sts import sms_sts
+    from scservo_def import COMM_SUCCESS
 except ModuleNotFoundError as local_error:
-    raise ModuleNotFoundError(
-        "STServo SDK를 찾을 수 없습니다. "
-        "가상환경에서 'pip install ftservo-python-sdk'를 실행하거나 "
-        f"로컬 SDK를 '{SDK_PATH}'에 배치하세요."
-    ) from local_error
+    try:
+        # 로컬 SDK가 없을 경우 pip 설치본도 사용할 수 있게 fallback.
+        from scservo_sdk.port_handler import PortHandler
+        from scservo_sdk.sms_sts import sms_sts
+        from scservo_sdk.scservo_def import COMM_SUCCESS
+    except ModuleNotFoundError as pip_error:
+        raise ModuleNotFoundError(
+            "STServo SDK를 찾을 수 없습니다. "
+            f"로컬 SDK를 '{SDK_PATH}'에 배치하거나 "
+            "가상환경에서 'pip install ftservo-python-sdk pyserial'을 실행하세요."
+        ) from pip_error
 
 
 # ============================================================

@@ -34,11 +34,9 @@ CALIBRATION_FILE = os.path.join(
 
 SDK_PATH = os.path.join(
     PROJECT_ROOT,
-    "STServo_Python",
-    "stservo-env",
+    "stservo_env",
     "scservo_sdk",
 )
-
 
 # ============================================================
 # 2. Serial 기본 설정
