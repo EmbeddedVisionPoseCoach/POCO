@@ -132,6 +132,9 @@ LOCAL_SDK_CANDIDATES = [
 
 
 try:
+    # from WorkSpace.hardware.stservo_env.scservo_sdk.port_handler import PortHandler
+    # from WorkSpace.hardware.stservo_env.scservo_sdk.sms_sts import sms_sts
+    # from WorkSpace.hardware.stservo_env.scservo_sdk.scservo_def import COMM_SUCCESS
     from scservo_sdk.port_handler import PortHandler
     from scservo_sdk.sms_sts import sms_sts
     from scservo_sdk.scservo_def import COMM_SUCCESS

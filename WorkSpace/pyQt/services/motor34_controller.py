@@ -361,7 +361,7 @@ class Motor34Controller:
         # Motor3 = 좌/우 = Roll PID
         return self._control_axis(
             self.motor3,
-            correction_roll_speed_deg_s,
+            correction_pitch_speed_deg_s,
             pid_limit_deg_s,
             now,
         )
@@ -370,7 +370,7 @@ class Motor34Controller:
         # Motor4 = 위/아래 = Pitch PID
         return self._control_axis(
             self.motor4,
-            correction_pitch_speed_deg_s,
+            correction_roll_speed_deg_s,
             pid_limit_deg_s,
             now,
         )
@@ -427,12 +427,12 @@ class Motor34Controller:
             # Motor3: 좌/우 <- Roll PID
             # Motor4: 위/아래 <- Pitch PID
             self._control_motor3(
-                imu_state.get("correction_roll_speed_deg_s", 0.0),
+                imu_state.get("correction_pitch_speed_deg_s", 0.0),
                 pid_limit_deg_s,
                 now,
             )
             self._control_motor4(
-                imu_state.get("correction_pitch_speed_deg_s", 0.0),
+                imu_state.get("correction_roll_speed_deg_s", 0.0),
                 pid_limit_deg_s,
                 now,
             )

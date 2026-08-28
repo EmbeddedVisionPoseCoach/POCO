@@ -45,9 +45,9 @@ if SDK_PATH not in sys.path:
 try:
     # 로컬 STServo SDK는 내부에서 `from scservo_def import *` 같은
     # bare import를 사용하므로 scservo_sdk 폴더 자체를 sys.path에 넣는다.
-    from port_handler import PortHandler
-    from sms_sts import sms_sts
-    from scservo_def import COMM_SUCCESS
+    from scservo_sdk.port_handler import PortHandler
+    from scservo_sdk.sms_sts import sms_sts
+    from scservo_sdk.scservo_def import COMM_SUCCESS
 except ModuleNotFoundError as local_error:
     try:
         # 로컬 SDK가 없을 경우 pip 설치본도 사용할 수 있게 fallback.
