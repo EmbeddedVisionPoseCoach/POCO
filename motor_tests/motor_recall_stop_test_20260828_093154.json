@@ -1,0 +1,58 @@
+{
+    "created_at": "2026-08-28T09:31:54.257273",
+    "joint": "wrist_flex",
+    "servo_id": 3,
+    "results": [
+        {
+            "test": "move_joint() running re-call x2",
+            "passed": true,
+            "detail": {
+                "call1": {
+                    "target_deg": 50.0,
+                    "return": true,
+                    "elapsed_sec": 0.0018598009482957423,
+                    "expected_goal_raw": 2001,
+                    "actual_goal_raw": 2001
+                },
+                "recall1": {
+                    "trigger_deg": 10.0,
+                    "actual_trigger_angle": 10.1953125,
+                    "actual_trigger_raw": 2454,
+                    "new_target_deg": 30.0,
+                    "return": true,
+                    "elapsed_sec": 0.0017491719918325543,
+                    "expected_goal_raw": 2229,
+                    "actual_goal_raw": 2229
+                },
+                "recall2": {
+                    "trigger_deg": 20.0,
+                    "actual_trigger_angle": 20.126953125,
+                    "actual_trigger_raw": 2341,
+                    "new_target_deg": 25.0,
+                    "return": true,
+                    "elapsed_sec": 0.0009697329951450229,
+                    "expected_goal_raw": 2286,
+                    "actual_goal_raw": 2286
+                },
+                "final": {
+                    "angle": 24.609375,
+                    "raw": 2290,
+                    "goal_raw": 2286,
+                    "moving": 0,
+                    "torque": 1,
+                    "max_angle_after_recall2": 24.609375
+                },
+                "checks": {
+                    "goal1_ok": true,
+                    "goal2_ok": true,
+                    "goal3_ok": true,
+                    "final_goal_ok": true,
+                    "final_angle_ok": true,
+                    "final_moving_ok": true,
+                    "torque_ok": true
+                }
+            },
+            "time": "2026-08-28T09:31:32.556044"
+        }
+    ]
+}

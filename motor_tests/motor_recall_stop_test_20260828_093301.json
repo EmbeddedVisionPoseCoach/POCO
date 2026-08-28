@@ -1,0 +1,124 @@
+{
+    "created_at": "2026-08-28T09:33:01.584193",
+    "joint": "wrist_flex",
+    "servo_id": 3,
+    "results": [
+        {
+            "test": "move_joint() running re-call x2",
+            "passed": true,
+            "detail": {
+                "call1": {
+                    "target_deg": 50.0,
+                    "return": true,
+                    "elapsed_sec": 0.0019026519730687141,
+                    "expected_goal_raw": 2001,
+                    "actual_goal_raw": 2001
+                },
+                "recall1": {
+                    "trigger_deg": 10.0,
+                    "actual_trigger_angle": 10.1953125,
+                    "actual_trigger_raw": 2454,
+                    "new_target_deg": 30.0,
+                    "return": true,
+                    "elapsed_sec": 0.0016826349892653525,
+                    "expected_goal_raw": 2229,
+                    "actual_goal_raw": 2229
+                },
+                "recall2": {
+                    "trigger_deg": 20.0,
+                    "actual_trigger_angle": 20.126953125,
+                    "actual_trigger_raw": 2341,
+                    "new_target_deg": 25.0,
+                    "return": true,
+                    "elapsed_sec": 0.001691301993560046,
+                    "expected_goal_raw": 2286,
+                    "actual_goal_raw": 2286
+                },
+                "final": {
+                    "angle": 24.609375,
+                    "raw": 2290,
+                    "goal_raw": 2286,
+                    "moving": 0,
+                    "torque": 1,
+                    "max_angle_after_recall2": 24.609375
+                },
+                "checks": {
+                    "goal1_ok": true,
+                    "goal2_ok": true,
+                    "goal3_ok": true,
+                    "final_goal_ok": true,
+                    "final_angle_ok": true,
+                    "final_moving_ok": true,
+                    "torque_ok": true
+                }
+            },
+            "time": "2026-08-28T09:32:10.818115"
+        },
+        {
+            "test": "USER STOP latch blocks move_joint()",
+            "passed": true,
+            "detail": {
+                "call_return": false,
+                "goal_before": 2416,
+                "goal_after": 2416,
+                "angle": 13.623046875,
+                "moving": 0,
+                "torque": 1
+            },
+            "time": "2026-08-28T09:32:41.481799"
+        },
+        {
+            "test": "USER STOP release does not move servo",
+            "passed": true,
+            "detail": {
+                "angle_before": 13.623046875,
+                "angle_after": 13.623046875,
+                "position_shift_deg": 0.0,
+                "goal_before": 2416,
+                "goal_after": 2416,
+                "torque": 1
+            },
+            "time": "2026-08-28T09:32:50.317252"
+        },
+        {
+            "test": "move_joint() works after USER STOP release",
+            "passed": true,
+            "detail": {
+                "call_return": true,
+                "expected_goal": 2229,
+                "goal_after_call": 2229,
+                "final_goal": 2229,
+                "final_angle": 29.619140625,
+                "final_raw": 2233,
+                "final_moving": 0,
+                "final_torque": 1
+            },
+            "time": "2026-08-28T09:32:55.626456"
+        },
+        {
+            "test": "USER STOP + latch + release full candidate",
+            "passed": true,
+            "detail": {
+                "hold_angle": 13.53515625,
+                "stopped_angle": 13.623046875,
+                "max_extra_travel_deg": 0.439453125,
+                "goal_overwritten": true,
+                "torque_kept": true,
+                "moving_stopped": true,
+                "physical_hold": true,
+                "block_ok": true,
+                "release_ok": true,
+                "resume_ok": true
+            },
+            "time": "2026-08-28T09:32:55.626744"
+        },
+        {
+            "test": "move_to_zero() after USER STOP full test",
+            "passed": true,
+            "detail": {
+                "return": true
+            },
+            "time": "2026-08-28T09:33:01.580569"
+        }
+    ]
+}

@@ -566,10 +566,34 @@ def best_effort_hold(
     arm: MotorController | None,
     speed: int,
 ):
+    """
+    예외/Ctrl+C 발생 시 안전 보조 처리.
+
+    중요:
+    - Servo가 실제로 Moving=1일 때만 현재 Position Hold를 쓴다.
+    - PRECHECK 오류처럼 아직 움직이지 않은 상태(Moving=0)에서는
+      Servo에 어떠한 Write 명령도 보내지 않는다.
+    """
+
     if arm is None:
         return
 
     try:
+        moving = read_moving(
+            arm
+        )
+
+        if moving != 1:
+            print()
+            print(
+                "[SAFETY] Servo가 이동 중이 아니므로 "
+                "추가 Hold Write를 보내지 않습니다."
+            )
+            print(
+                f"[SAFETY] Moving={moving}"
+            )
+            return
+
         result = write_current_position_as_goal(
             arm,
             speed,
@@ -577,7 +601,8 @@ def best_effort_hold(
 
         print()
         print(
-            "[SAFETY] Best-Effort Current Position Hold"
+            "[SAFETY] 이동 중 예외 감지 -> "
+            "Best-Effort Current Position Hold"
         )
         print(
             result
@@ -586,7 +611,7 @@ def best_effort_hold(
     except Exception as error:
         print()
         print(
-            "[WARNING] Current Position Hold 실패:"
+            "[WARNING] Current Position Hold 확인/실행 실패:"
         )
         print(error)
 
@@ -660,7 +685,6 @@ def precheck(
         RECALL2_TARGET_DEG,
         RECALL1_TRIGGER_DEG,
         RECALL2_TRIGGER_DEG,
-        RECALL_TRIGGER_DEG,
         STOP_TRIGGER_DEG,
     )
 
@@ -1325,51 +1349,104 @@ def test_user_stop_candidate(
     speed: int,
 ):
     """
-    실제 사용자 비상정지 입력과 비슷하게 테스트한다.
+    사용자용 비상정지 후보의 전체 흐름을 독립 테스트한다.
 
-    wrist_flex를 0° -> +50°로 이동시키고,
-    사용자가 원하는 순간 터미널에서 STOP + Enter를 입력한다.
+    중요:
+    현재 motor_control 패키지에는 아직 사용자용
+    stop/resume 공개 API를 추가하지 않았다.
 
-    STOP 입력이 감지되면:
-        Present Position 읽기
-        -> 그 Position을 새 Goal Position으로 즉시 덮어쓰기
-        -> Torque는 계속 ON
+    따라서 이 테스트 파일 내부에서만 별도의 software latch를 만들어
+    최종 패키지에 넣을 동작 정책을 검증한다.
 
-    확인:
-        - 기존 목표가 현재 위치 Goal로 바뀌는가
-        - Moving이 0으로 되는가
-        - Torque Enable이 계속 1인가
-        - 실제 팔이 힘을 유지하는가
-        - STOP 입력 후 얼마나 더 이동했는가
+    흐름:
+        1) wrist_flex 0° -> +50° 이동
+        2) 사용자가 '1' 입력
+        3) software latch ON
+        4) 현재 Position을 Goal로 덮어써 Torque ON 상태로 정지
+        5) latch 상태에서 +30° 이동을 일부러 재호출
+           -> Servo에 명령을 보내지 않고 BLOCK되어야 함
+        6) 사용자가 '2' 입력
+        7) latch OFF
+           -> 이 순간에는 모터 명령을 보내지 않음
+        8) +30° 이동을 다시 호출
+           -> 이번에는 정상 실행되어야 함
+
+    즉 최종 사용자용 API에서 필요한:
+        STOP
+        -> 이동 차단
+        -> RESUME
+        -> 다시 이동 허용
+    전체 정책을 확인한다.
     """
 
     section(
-        "TEST 2 - 수동 입력 사용자 비상정지 후보"
+        "TEST 2 - 사용자 비상정지 + 재호출 차단 + 해제"
     )
 
     print(
         "이 테스트는 기존 arm.emergency_stop()을 사용하지 않습니다."
     )
-    print()
     print(
-        "테스트 순서:"
-    )
-    print(
-        "  ① wrist_flex 0° -> +50° 이동 시작"
-    )
-    print(
-        "  ② 이동 중 원하는 순간 터미널에 1 입력 후 Enter"
-    )
-    print(
-        "  ③ 그 순간 Present Position을 새 Goal로 덮어씀"
-    )
-    print(
-        "  ④ Torque=1 유지 여부와 실제 자세 유지 확인"
+        "기존 emergency_stop()은 Torque OFF용 개발/점검 기능입니다."
     )
     print()
     print(
-        "중요: +50° 도달 전에 1을 입력하세요."
+        "이번 테스트:"
     )
+    print(
+        "  ① 0° -> +50° 이동"
+    )
+    print(
+        "  ② 이동 중 '1' 입력 = 사용자 비상정지 후보"
+    )
+    print(
+        "  ③ Torque ON 상태에서 현재 자세 Hold"
+    )
+    print(
+        "  ④ 정지 latch 중 +30° 이동 재호출 -> BLOCK 확인"
+    )
+    print(
+        "  ⑤ '2' 입력 = 정지 latch 해제"
+    )
+    print(
+        "  ⑥ 해제 자체로는 움직이지 않는지 확인"
+    )
+    print(
+        "  ⑦ +30° 이동 재호출 -> 정상 실행 확인"
+    )
+
+    # 이 Event는 테스트 전용.
+    # 최종 패키지에서는 Controller 내부 상태로 구현할 후보이다.
+    user_stop_latched = threading.Event()
+
+    def guarded_move_joint(
+        angle: float,
+        *,
+        wait: bool,
+    ):
+        """
+        최종 사용자용 stop latch 정책을 테스트 파일에서 모사한다.
+
+        latch ON이면 실제 arm.move_joint()을 절대 호출하지 않는다.
+        따라서 Servo Goal Position도 변경되어서는 안 된다.
+        """
+
+        if user_stop_latched.is_set():
+            print()
+            print(
+                "[BLOCK] USER STOP latch가 ON이므로 "
+                f"move_joint({angle:+.1f}°)을 Servo에 보내지 않습니다."
+            )
+            return False
+
+        return arm.move_joint(
+            TEST_JOINT,
+            angle=angle,
+            speed=speed,
+            acc=TEST_ACC,
+            wait=wait,
+            timeout=COMMAND_TIMEOUT_SEC,
+        )
 
     wait_enter(
         "먼저 wrist_flex를 Zero로 이동합니다."
@@ -1413,7 +1490,7 @@ def test_user_stop_candidate(
             try:
                 command = input(
                     "\n[USER STOP] 이동 중 1 입력 후 Enter: "
-                ).strip().upper()
+                ).strip()
             except EOFError:
                 return
 
@@ -1422,12 +1499,11 @@ def test_user_stop_candidate(
                 stop_event.set()
                 return
 
+            print()
             print(
-                "\n[INFO] 비상정지는 정확히 1을 입력해야 합니다."
+                "[INFO] 사용자 비상정지는 정확히 1을 입력하세요."
             )
 
-    # 사용자 입력은 별도 스레드에서 기다리고,
-    # 메인 스레드는 Servo 상태를 계속 출력한다.
     input_thread = threading.Thread(
         target=stop_input_worker,
         daemon=True,
@@ -1435,17 +1511,14 @@ def test_user_stop_candidate(
 
     input_thread.start()
 
-    # --------------------------------------------------------
-    # +50° 이동 시작
-    # --------------------------------------------------------
+    # ========================================================
+    # A. +50° 이동 시작
+    # ========================================================
 
     move_start_time = time.monotonic()
 
-    move_result = arm.move_joint(
-        TEST_JOINT,
-        angle=FIRST_TARGET_DEG,
-        speed=speed,
-        acc=TEST_ACC,
+    move_result = guarded_move_joint(
+        FIRST_TARGET_DEG,
         wait=False,
     )
 
@@ -1468,15 +1541,11 @@ def test_user_stop_candidate(
 
     samples_before_stop = []
 
-    # --------------------------------------------------------
-    # 1 입력 전까지 실시간 상태 출력
-    # --------------------------------------------------------
-
     while not stop_event.is_set():
 
         sample = print_live_status(
             arm,
-            "WAIT STOP",
+            "WAIT 1",
             move_start_time,
         )
 
@@ -1490,7 +1559,6 @@ def test_user_stop_candidate(
                 "Position 읽기 실패"
             )
 
-        # 이미 목표에 도착했는데 STOP이 안 들어온 경우
         if (
             sample["moving"] == 0
             and
@@ -1512,9 +1580,19 @@ def test_user_stop_candidate(
 
     print()
 
-    # --------------------------------------------------------
-    # 1 입력 직후 현재 위치를 Goal로 덮어씀
-    # --------------------------------------------------------
+    # ========================================================
+    # B. 1 입력 즉시 latch ON
+    # ========================================================
+    #
+    # 최종 기능에서도 먼저 latch를 걸고,
+    # 그 다음 물리 정지 동작을 수행하는 방식이 안전하다.
+    # 이렇게 해야 정지 처리 중 다른 이동 명령이 끼어들지 않는다.
+
+    user_stop_latched.set()
+
+    print(
+        "[USER STOP] latch = ON"
+    )
 
     input_detected_time = (
         input_time_holder["time"]
@@ -1586,13 +1664,13 @@ def test_user_stop_candidate(
         "------------------------------------------------------------"
     )
     print(
-        "USER STOP COMMAND RESULT"
+        "USER STOP RESULT"
     )
     print(
         "------------------------------------------------------------"
     )
     print(
-        f"정지 입력 당시 Angle : {before_stop_angle:+.2f}°"
+        f"정지 입력 직전 Angle : {before_stop_angle:+.2f}°"
     )
     print(
         f"Hold Goal Angle      : {hold_angle:+.2f}°"
@@ -1607,15 +1685,18 @@ def test_user_stop_candidate(
         f"Torque Enable        : {torque_immediately_after}"
     )
     print(
-        f"입력→명령 지연       : {input_to_command_delay:.4f}s"
+        f"USER STOP latch      : {user_stop_latched.is_set()}"
     )
     print(
-        f"정지 명령 처리시간   : {command_elapsed:.4f}s"
+        f"입력→정지처리 지연    : {input_to_command_delay:.4f}s"
+    )
+    print(
+        f"정지 명령 처리시간    : {command_elapsed:.4f}s"
     )
 
-    # --------------------------------------------------------
-    # 정지 후 2초 동안 상태 계속 출력
-    # --------------------------------------------------------
+    # ========================================================
+    # C. 정지 후 2초 상태 관찰
+    # ========================================================
 
     observe_start = time.monotonic()
     samples_after_stop = []
@@ -1628,7 +1709,7 @@ def test_user_stop_candidate(
 
         sample = print_live_status(
             arm,
-            "AFTER STOP",
+            "STOPPED",
             observe_start,
         )
 
@@ -1645,6 +1726,361 @@ def test_user_stop_candidate(
         )
 
     print()
+
+    stopped_raw, stopped_angle = (
+        read_position_and_angle(
+            arm
+        )
+    )
+
+    stopped_goal = (
+        read_goal_position(
+            arm
+        )
+    )
+
+    stopped_moving = (
+        read_moving(
+            arm
+        )
+    )
+
+    torque_stopped = (
+        read_torque_enable(
+            arm
+        )
+    )
+
+    max_extra_travel = max(
+        abs(
+            sample["angle"]
+            - hold_angle
+        )
+        for sample in samples_after_stop
+        if sample["angle"] is not None
+    )
+
+    physical_hold = ask_yes_no(
+        "실제로 모터 힘이 유지되고 현재 자세를 잡고 있나요?"
+    )
+
+    # ========================================================
+    # D. latch 상태에서 이동 함수 재호출 -> 반드시 BLOCK
+    # ========================================================
+
+    section(
+        "TEST 2-A - USER STOP 중 함수 재호출 BLOCK"
+    )
+
+    print(
+        "현재 USER STOP latch = ON 상태입니다."
+    )
+    print(
+        "이제 +30° move_joint()을 일부러 호출합니다."
+    )
+    print(
+        "정상이라면 Servo에는 아무 명령도 가지 않아야 합니다."
+    )
+
+    goal_before_block_test = (
+        read_goal_position(
+            arm
+        )
+    )
+
+    blocked_call_result = (
+        guarded_move_joint(
+            RECALL1_TARGET_DEG,
+            wait=False,
+        )
+    )
+
+    time.sleep(
+        0.3
+    )
+
+    goal_after_block_test = (
+        read_goal_position(
+            arm
+        )
+    )
+
+    blocked_raw, blocked_angle = (
+        read_position_and_angle(
+            arm
+        )
+    )
+
+    blocked_moving = (
+        read_moving(
+            arm
+        )
+    )
+
+    blocked_torque = (
+        read_torque_enable(
+            arm
+        )
+    )
+
+    block_ok = (
+        blocked_call_result is False
+        and
+        goal_after_block_test
+        == goal_before_block_test
+    )
+
+    print()
+    print(
+        f"재호출 return       : {blocked_call_result}"
+    )
+    print(
+        f"호출 전 Goal        : {goal_before_block_test}"
+    )
+    print(
+        f"호출 후 Goal        : {goal_after_block_test}"
+    )
+    print(
+        f"현재 Angle          : {blocked_angle:+.2f}°"
+    )
+    print(
+        f"현재 Moving         : {blocked_moving}"
+    )
+    print(
+        f"현재 Torque         : {blocked_torque}"
+    )
+    print(
+        f"BLOCK 검증          : {'PASS' if block_ok else 'FAIL'}"
+    )
+
+    record(
+        "USER STOP latch blocks move_joint()",
+        block_ok,
+        {
+            "call_return":
+                blocked_call_result,
+            "goal_before":
+                goal_before_block_test,
+            "goal_after":
+                goal_after_block_test,
+            "angle":
+                blocked_angle,
+            "moving":
+                blocked_moving,
+            "torque":
+                blocked_torque,
+        },
+    )
+
+    if not block_ok:
+        raise RuntimeError(
+            "USER STOP latch 중 이동 차단 실패"
+        )
+
+    # ========================================================
+    # E. 사용자 입력 2 -> latch 해제
+    # ========================================================
+
+    section(
+        "TEST 2-B - USER STOP 해제"
+    )
+
+    print(
+        "이제 사용자용 비상정지 상태를 해제합니다."
+    )
+    print(
+        "중요: 해제 자체는 Servo에 이동 명령을 보내지 않습니다."
+    )
+    print(
+        "따라서 2를 입력한 순간 로봇팔이 움직이면 안 됩니다."
+    )
+
+    while True:
+        command = input(
+            "해제하려면 2 입력 후 Enter: "
+        ).strip()
+
+        if command == "2":
+            break
+
+        print(
+            "[INFO] 해제는 정확히 2를 입력하세요."
+        )
+
+    raw_before_release, angle_before_release = (
+        read_position_and_angle(
+            arm
+        )
+    )
+
+    goal_before_release = (
+        read_goal_position(
+            arm
+        )
+    )
+
+    user_stop_latched.clear()
+
+    print()
+    print(
+        "[USER STOP] latch = OFF"
+    )
+
+    # 해제 자체로 움직이지 않는지 짧게 관찰
+    release_observe_start = time.monotonic()
+    release_samples = []
+
+    while (
+        time.monotonic()
+        - release_observe_start
+        < 0.8
+    ):
+        sample = print_live_status(
+            arm,
+            "RELEASED",
+            release_observe_start,
+        )
+        release_samples.append(
+            sample
+        )
+        time.sleep(
+            MONITOR_INTERVAL_SEC
+        )
+
+    print()
+
+    raw_after_release, angle_after_release = (
+        read_position_and_angle(
+            arm
+        )
+    )
+
+    goal_after_release = (
+        read_goal_position(
+            arm
+        )
+    )
+
+    torque_after_release = (
+        read_torque_enable(
+            arm
+        )
+    )
+
+    release_did_not_command_motion = (
+        goal_after_release
+        == goal_before_release
+    )
+
+    release_position_shift = abs(
+        angle_after_release
+        - angle_before_release
+    )
+
+    release_ok = (
+        not user_stop_latched.is_set()
+        and
+        release_did_not_command_motion
+        and
+        torque_after_release == 1
+        and
+        release_position_shift
+        <= FINAL_ANGLE_TOLERANCE_DEG
+    )
+
+    print()
+    print(
+        f"해제 전 Angle       : {angle_before_release:+.2f}°"
+    )
+    print(
+        f"해제 후 Angle       : {angle_after_release:+.2f}°"
+    )
+    print(
+        f"해제 전 Goal        : {goal_before_release}"
+    )
+    print(
+        f"해제 후 Goal        : {goal_after_release}"
+    )
+    print(
+        f"Torque              : {torque_after_release}"
+    )
+    print(
+        f"해제 자체 무동작     : {'PASS' if release_ok else 'FAIL'}"
+    )
+
+    record(
+        "USER STOP release does not move servo",
+        release_ok,
+        {
+            "angle_before":
+                angle_before_release,
+            "angle_after":
+                angle_after_release,
+            "position_shift_deg":
+                release_position_shift,
+            "goal_before":
+                goal_before_release,
+            "goal_after":
+                goal_after_release,
+            "torque":
+                torque_after_release,
+        },
+    )
+
+    if not release_ok:
+        raise RuntimeError(
+            "USER STOP 해제 동작 검증 실패"
+        )
+
+    # ========================================================
+    # F. 해제 후 같은 +30° 명령 재호출 -> 이번에는 정상 동작
+    # ========================================================
+
+    section(
+        "TEST 2-C - 해제 후 함수 재호출"
+    )
+
+    wait_enter(
+        "이제 USER STOP이 해제되었습니다. "
+        "동일하게 +30° move_joint()을 호출합니다."
+    )
+
+    expected_resume_goal = (
+        arm.calibration.command_angle_to_position(
+            TEST_JOINT,
+            RECALL1_TARGET_DEG,
+        )
+    )
+
+    resume_call_result = (
+        guarded_move_joint(
+            RECALL1_TARGET_DEG,
+            wait=False,
+        )
+    )
+
+    resume_goal = (
+        read_goal_position(
+            arm
+        )
+    )
+
+    print()
+    print(
+        f"[RESUME CALL] +30° | "
+        f"return={resume_call_result} | "
+        f"Goal={resume_goal} | "
+        f"Expected={expected_resume_goal}"
+    )
+
+    resume_samples = (
+        monitor_until_stopped(
+            arm,
+            expected_angle=RECALL1_TARGET_DEG,
+            timeout=COMMAND_TIMEOUT_SEC,
+            stage="RESUMED",
+        )
+    )
 
     final_raw, final_angle = (
         read_position_and_angle(
@@ -1664,30 +2100,64 @@ def test_user_stop_candidate(
         )
     )
 
-    torque_after = (
+    final_torque = (
         read_torque_enable(
             arm
         )
     )
 
-    max_extra_travel = max(
+    resume_ok = (
+        resume_call_result is True
+        and
+        resume_goal
+        == expected_resume_goal
+        and
+        final_goal
+        == expected_resume_goal
+        and
         abs(
-            sample["angle"]
-            - hold_angle
+            final_angle
+            - RECALL1_TARGET_DEG
         )
-        for sample in samples_after_stop
-        if sample["angle"] is not None
+        <= FINAL_ANGLE_TOLERANCE_DEG
+        and
+        final_moving == 0
+        and
+        final_torque == 1
     )
 
-    physical_hold = ask_yes_no(
-        "실제로 모터 힘이 유지되고 현재 자세를 잡고 있나요?"
+    record(
+        "move_joint() works after USER STOP release",
+        resume_ok,
+        {
+            "call_return":
+                resume_call_result,
+            "expected_goal":
+                expected_resume_goal,
+            "goal_after_call":
+                resume_goal,
+            "final_goal":
+                final_goal,
+            "final_angle":
+                final_angle,
+            "final_raw":
+                final_raw,
+            "final_moving":
+                final_moving,
+            "final_torque":
+                final_torque,
+        },
     )
+
+    # ========================================================
+    # G. TEST 2 전체 판정
+    # ========================================================
 
     goal_overwritten = (
         goal_after_stop
         == hold_raw
         and
-        final_goal
+        stopped_goal
         == hold_raw
     )
 
@@ -1696,21 +2166,25 @@ def test_user_stop_candidate(
         and
         torque_immediately_after == 1
         and
-        torque_after == 1
+        torque_stopped == 1
+        and
+        blocked_torque == 1
+        and
+        torque_after_release == 1
+        and
+        final_torque == 1
     )
 
     stopped_near_hold = (
-        final_angle is not None
-        and
         abs(
-            final_angle
+            stopped_angle
             - hold_angle
         )
         <= FINAL_ANGLE_TOLERANCE_DEG
     )
 
     moving_stopped = (
-        final_moving == 0
+        stopped_moving == 0
     )
 
     passed = (
@@ -1723,126 +2197,88 @@ def test_user_stop_candidate(
         moving_stopped
         and
         physical_hold
+        and
+        block_ok
+        and
+        release_ok
+        and
+        resume_ok
     )
 
     print()
     print(
-        "------------------------------------------------------------"
+        "============================================================"
     )
     print(
-        "TEST 2 FINAL STATE"
+        "TEST 2 FINAL SUMMARY"
     )
     print(
-        "------------------------------------------------------------"
+        "============================================================"
     )
     print(
-        f"정지 당시 Angle      : {hold_angle:+.2f}°"
+        f"Torque 유지 정지       : "
+        f"{'PASS' if goal_overwritten and stopped_near_hold else 'FAIL'}"
     )
     print(
-        f"최종 Angle           : {final_angle:+.2f}°"
+        f"Torque=1 유지          : "
+        f"{'PASS' if torque_kept else 'FAIL'}"
     )
     print(
-        f"정지 후 최대 추가이동: {max_extra_travel:.2f}°"
+        f"정지 후 Moving=0       : "
+        f"{'PASS' if moving_stopped else 'FAIL'}"
     )
     print(
-        f"최종 Goal            : {final_goal}"
+        f"실제 자세 유지         : "
+        f"{'PASS' if physical_hold else 'FAIL'}"
     )
     print(
-        f"최종 Moving          : {final_moving}"
+        f"정지 중 이동 재호출 차단: "
+        f"{'PASS' if block_ok else 'FAIL'}"
     )
     print(
-        f"최종 Torque          : {torque_after}"
+        f"2 입력 해제 자체 무동작 : "
+        f"{'PASS' if release_ok else 'FAIL'}"
     )
     print(
-        f"실제 자세 유지       : {physical_hold}"
+        f"해제 후 재호출 가능     : "
+        f"{'PASS' if resume_ok else 'FAIL'}"
+    )
+    print(
+        f"정지 후 최대 추가이동   : "
+        f"{max_extra_travel:.2f}°"
     )
 
-    detail = {
-        "move_start_return":
-            move_result,
-
-        "goal_before_stop":
-            goal_before_stop,
-
-        "stop_input_angle":
-            before_stop_angle,
-
-        "stop_input_raw":
-            before_stop_raw,
-
-        "hold_angle":
-            hold_angle,
-
-        "hold_raw":
-            hold_raw,
-
-        "goal_after_stop":
-            goal_after_stop,
-
-        "final_goal":
-            final_goal,
-
-        "input_to_command_delay_sec":
-            input_to_command_delay,
-
-        "stop_command_elapsed_sec":
-            command_elapsed,
-
-        "max_extra_travel_deg":
-            max_extra_travel,
-
-        "final_angle":
-            final_angle,
-
-        "final_raw":
-            final_raw,
-
-        "final_moving":
-            final_moving,
-
-        "torque_before":
-            torque_before,
-
-        "torque_immediately_after":
-            torque_immediately_after,
-
-        "torque_after":
-            torque_after,
-
-        "physical_hold":
-            physical_hold,
-
-        "checks": {
+    record(
+        "USER STOP + latch + release full candidate",
+        passed,
+        {
+            "hold_angle":
+                hold_angle,
+            "stopped_angle":
+                stopped_angle,
+            "max_extra_travel_deg":
+                max_extra_travel,
             "goal_overwritten":
                 goal_overwritten,
             "torque_kept":
                 torque_kept,
-            "stopped_near_hold":
-                stopped_near_hold,
             "moving_stopped":
                 moving_stopped,
+            "physical_hold":
+                physical_hold,
+            "block_ok":
+                block_ok,
+            "release_ok":
+                release_ok,
+            "resume_ok":
+                resume_ok,
         },
-    }
-
-    record(
-        "Manual-1-trigger Torque-ON stop candidate",
-        passed,
-        detail,
     )
 
     if passed:
-        print()
-        print(
-            "[PASS]"
-        )
-        print(
-            "수동 1 입력 시 현재 Goal로 변경되고 "
-            "Torque를 유지한 상태에서 정지했습니다."
-        )
-
         wait_enter(
-            "검증이 끝났습니다. "
-            "정상 move_to_zero()로 복귀합니다."
+            "TEST 2 전체 검증이 끝났습니다. "
+            "wrist_flex를 Zero로 복귀합니다."
         )
 
         zero_result = arm.move_to_zero(
@@ -1854,7 +2290,7 @@ def test_user_stop_candidate(
         )
 
         record(
-            "move_to_zero() after manual stop",
+            "move_to_zero() after USER STOP full test",
             zero_result is True,
             {
                 "return":
@@ -1865,14 +2301,8 @@ def test_user_stop_candidate(
     else:
         print()
         print(
-            "[FAIL]"
-        )
-        print(
-            "현재 방식은 사용자용 비상정지 요구조건을 "
-            "모두 만족하지 않았습니다."
-        )
-        print(
-            "실패 상태에서는 추가 이동을 자동 실행하지 않습니다."
+            "[FAIL] 사용자용 비상정지 후보 전체 조건을 "
+            "만족하지 않았으므로 자동 Zero 복귀하지 않습니다."
         )
 
     return passed
@@ -1884,7 +2314,7 @@ def test_user_stop_candidate(
 
 def main():
     section(
-        "MOTOR RE-CALL + USER STOP CANDIDATE TEST"
+        "MOTOR RE-CALL x2 + USER STOP / RELEASE TEST (v4)"
     )
 
     print(
