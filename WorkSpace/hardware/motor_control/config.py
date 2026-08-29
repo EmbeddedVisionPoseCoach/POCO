@@ -34,9 +34,11 @@ CALIBRATION_FILE = os.path.join(
 
 SDK_PATH = os.path.join(
     PROJECT_ROOT,
-    "stservo_env",
+    "STServo_Python",
+    "stservo-env",
     "scservo_sdk",
 )
+
 
 # ============================================================
 # 2. Serial 기본 설정
@@ -125,15 +127,24 @@ POLL_INTERVAL_SEC = 0.05
 
 
 # ============================================================
-# 7. Emergency Stop / Torque 설정
+# 7. Stop / Torque 설정
 # ============================================================
 # STS3215 계열 Torque Enable SRAM 주소.
 # 0 = Torque OFF
 # 1 = Torque ON
 #
-# 현재 공개 API의 emergency_stop()은 TORQUE_OFF만 사용한다.
-# 복구(Torque ON)는 실제 기구에서 안전 복구 절차를 검증한 뒤 공개 API로 추가한다.
+# emergency_stop()
+#   -> 기존 개발/점검용 전체 Torque OFF 기능. 기존 API/동작 유지.
+#
+# user_stop()
+#   -> Torque를 건드리지 않고 현재 Position을 Goal로 다시 써서 자세를 Hold한다.
+#      아래 Hold Speed/Acc는 ID3 wrist_flex 단축 하드웨어 후보 테스트에서
+#      speed=80, acc=10으로 정상 정지/유지를 확인한 값을 기본으로 사용한다.
+#      최종 사용자 안전 기능 승인 전에는 4축 동시/부하 조건에서 별도 실물 검증이 필요하다.
 
 ADDR_TORQUE_ENABLE = 40
 TORQUE_OFF = 0
 TORQUE_ON = 1
+
+USER_STOP_HOLD_SPEED = 80
+USER_STOP_HOLD_ACC = DEFAULT_ACC

@@ -1,5 +1,5 @@
 {
-    "saved_at": "2026-08-28T09:43:41.159396",
+    "saved_at": "2026-08-26T11:43:17.157702",
     "device": "/dev/ttyACM0",
     "baudrate": 1000000,
     "servos": {
@@ -17,7 +17,7 @@
             "position_at_urdf_max_angle": 2790,
             "safe_position_at_min_angle": 574,
             "safe_position_at_max_angle": 2710,
-            "max_speed": 1000
+            "max_speed": 100
         },
         "2": {
             "servo_id": 2,
@@ -33,7 +33,7 @@
             "position_at_urdf_max_angle": 3112,
             "safe_position_at_min_angle": 996,
             "safe_position_at_max_angle": 3026,
-            "max_speed": 1000
+            "max_speed": 100
         },
         "3": {
             "servo_id": 3,
@@ -49,7 +49,7 @@
             "position_at_urdf_max_angle": 3651,
             "safe_position_at_min_angle": 1507,
             "safe_position_at_max_angle": 3645,
-            "max_speed": 1000
+            "max_speed": 100
         },
         "4": {
             "servo_id": 4,
@@ -65,7 +65,7 @@
             "position_at_urdf_max_angle": 1023,
             "safe_position_at_min_angle": 4095,
             "safe_position_at_max_angle": 1023,
-            "max_speed": 1000
+            "max_speed": 100
         }
     }
 }

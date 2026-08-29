@@ -147,32 +147,21 @@ from datetime import datetime
 # 1. STServo Python SDK 경로
 # ============================================================
 
-BASE_DIR = os.path.dirname(
-    os.path.abspath(__file__)
+sdk_path = os.path.abspath(
+    "./STServo_Python/stservo-env/scservo_sdk"
 )
 
-SDK_PATH = os.path.join(
-    BASE_DIR,
-    "stservo_env",
-    "scservo_sdk"
-)
-
-if SDK_PATH not in sys.path:
-    sys.path.insert(0, SDK_PATH)
+if sdk_path not in sys.path:
+    sys.path.append(sdk_path)
 
 
 # ============================================================
 # 2. STServo SDK
 # ============================================================
 
-try:
-    from port_handler import PortHandler
-    from sms_sts import sms_sts
-    from scservo_def import *
-except ModuleNotFoundError:
-    from scservo_sdk.port_handler import PortHandler
-    from scservo_sdk.sms_sts import sms_sts
-    from scservo_sdk.scservo_def import *
+from port_handler import PortHandler
+from sms_sts import sms_sts
+from scservo_def import *
 
 
 # ============================================================
@@ -181,6 +170,7 @@ except ModuleNotFoundError:
 
 DEVICENAME = "/dev/ttyACM0"
 BAUDRATE = 1000000
+
 
 # ============================================================
 # 4. STS Position 기준
@@ -358,8 +348,7 @@ manual_acc = DEFAULT_ACC
 # 8. Calibration 저장 파일
 # ============================================================
 
-CALIBRATION_FILE = os.path.join(
-    BASE_DIR,
+CALIBRATION_FILE = (
     "servo_calibration_result.json"
 )
 

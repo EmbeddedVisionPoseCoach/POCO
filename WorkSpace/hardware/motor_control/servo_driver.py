@@ -18,9 +18,11 @@ STServo Python SDK와 직접 통신하는 저수준 Driver이다.
 이 파일에서는 Joint 이름, Zero, 각도 방향, Safe Range를 판단하지 않는다.
 그 책임은 calibration.py와 controller.py에 있다.
 
-Emergency Stop:
-- Torque Enable 주소에 0을 Sync Write하여 여러 Servo Torque를 한 패킷으로 OFF한다.
-- 이는 현재 위치 Hold가 아니라 Servo가 힘을 주지 않도록 Torque를 해제하는 동작이다.
+Stop 관련 저수준 기능:
+- emergency_stop용: Torque Enable 주소에 0을 Sync Write하여 전체 Torque를 OFF한다.
+- user_stop용: 4축 Present Position만 빠르게 읽고, Controller가 그 값을
+  sync_write_positions()로 한 번에 Goal Position에 다시 쓸 수 있도록 지원한다.
+- wait용: Position + Moving만 읽는 경량 read_motion_state()를 제공한다.
 """
 
 import sys
@@ -39,27 +41,19 @@ from .config import (
 # ============================================================
 
 if SDK_PATH not in sys.path:
-    sys.path.insert(0, SDK_PATH)
+    sys.path.append(SDK_PATH)
 
 
 try:
-    # 로컬 STServo SDK는 내부에서 `from scservo_def import *` 같은
-    # bare import를 사용하므로 scservo_sdk 폴더 자체를 sys.path에 넣는다.
     from scservo_sdk.port_handler import PortHandler
     from scservo_sdk.sms_sts import sms_sts
     from scservo_sdk.scservo_def import COMM_SUCCESS
 except ModuleNotFoundError as local_error:
-    try:
-        # 로컬 SDK가 없을 경우 pip 설치본도 사용할 수 있게 fallback.
-        from scservo_sdk.port_handler import PortHandler
-        from scservo_sdk.sms_sts import sms_sts
-        from scservo_sdk.scservo_def import COMM_SUCCESS
-    except ModuleNotFoundError as pip_error:
-        raise ModuleNotFoundError(
-            "STServo SDK를 찾을 수 없습니다. "
-            f"로컬 SDK를 '{SDK_PATH}'에 배치하거나 "
-            "가상환경에서 'pip install ftservo-python-sdk pyserial'을 실행하세요."
-        ) from pip_error
+    raise ModuleNotFoundError(
+        "STServo SDK를 찾을 수 없습니다. "
+        "가상환경에서 'pip install ftservo-python-sdk'를 실행하거나 "
+        f"로컬 SDK를 '{SDK_PATH}'에 배치하세요."
+    ) from local_error
 
 
 # ============================================================
@@ -262,6 +256,63 @@ class ServoDriver:
             return None
 
         return int(speed)
+
+    def read_positions(self, servo_ids):
+        """
+        여러 Servo의 Present Position만 연속으로 읽는다.
+
+        user_stop()에서 전체 read_state()를 사용하지 않고 최대한 짧게
+        현재 위치 4개를 확보하기 위한 경량 내부 경로이다.
+
+        중요:
+        - SyncRead 패킷이 아니라 Servo별 ReadPos 요청을 순서대로 수행한다.
+        - 다만 전체 읽기 구간 동안 _io_lock을 한 번만 잡아 다른 Thread의
+          Serial 패킷이 중간에 끼어들지 않도록 한다.
+        - 하나라도 읽기 실패하면 부분 결과를 사용하지 않고 None을 반환한다.
+        """
+        servo_ids = [int(servo_id) for servo_id in servo_ids]
+
+        if not servo_ids:
+            return {}
+
+        positions = {}
+
+        with self._io_lock:
+            for servo_id in servo_ids:
+                position, result, error = self.packet_handler.ReadPos(servo_id)
+
+                if result != COMM_SUCCESS or error != 0:
+                    return None
+
+                positions[servo_id] = int(position)
+
+        return positions
+
+    def read_motion_state(self, servo_id):
+        """
+        wait polling용 경량 상태 읽기.
+
+        목표 도착 확인에 필요한 Present Position과 Moving만 읽는다.
+        Load/Voltage/Temperature/Current 등 일반 모니터링 정보는 읽지 않는다.
+        """
+        servo_id = int(servo_id)
+
+        with self._io_lock:
+            position, result, error = self.packet_handler.ReadPos(servo_id)
+            if result != COMM_SUCCESS or error != 0:
+                return None
+
+            moving, result, error = self.packet_handler.read1ByteTxRx(
+                servo_id,
+                ADDR_MOVING,
+            )
+            if result != COMM_SUCCESS or error != 0:
+                moving = None
+
+        return {
+            "position": int(position),
+            "moving": moving,
+        }
 
     # ========================================================
     # Servo 상태 읽기
