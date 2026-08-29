@@ -17,7 +17,7 @@
             "position_at_urdf_max_angle": 2790,
             "safe_position_at_min_angle": 574,
             "safe_position_at_max_angle": 2710,
-            "max_speed": 100
+            "max_speed": 1000
         },
         "2": {
             "servo_id": 2,
@@ -33,7 +33,7 @@
             "position_at_urdf_max_angle": 3112,
             "safe_position_at_min_angle": 996,
             "safe_position_at_max_angle": 3026,
-            "max_speed": 100
+            "max_speed": 1000
         },
         "3": {
             "servo_id": 3,
@@ -49,7 +49,7 @@
             "position_at_urdf_max_angle": 3651,
             "safe_position_at_min_angle": 1507,
             "safe_position_at_max_angle": 3645,
-            "max_speed": 100
+            "max_speed": 1000
         },
         "4": {
             "servo_id": 4,
@@ -65,7 +65,7 @@
             "position_at_urdf_max_angle": 1023,
             "safe_position_at_min_angle": 4095,
             "safe_position_at_max_angle": 1023,
-            "max_speed": 100
+            "max_speed": 1000
         }
     }
 }
