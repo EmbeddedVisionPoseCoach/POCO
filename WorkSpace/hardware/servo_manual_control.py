@@ -149,8 +149,15 @@ import time
 # 1. STServo Python SDK 경로 설정
 # ============================================================
 
-sdk_path = os.path.abspath(
-    "./STServo_Python/stservo-env/scservo_sdk"
+# 현재 servo_manual_control.py 파일이 위치한 폴더
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# 현재 파일 위치를 기준으로 STServo SDK 경로 생성
+sdk_path = os.path.join(
+    BASE_DIR,
+    "STServo_Python",
+    "stservo-env",
+    "scservo_sdk",
 )
 
 if sdk_path not in sys.path:
@@ -178,7 +185,10 @@ BAUDRATE = 1000000
 # 4. Calibration 파일
 # ============================================================
 
-CALIBRATION_FILE = "servo_calibration_result.json"
+CALIBRATION_FILE = os.path.join(
+    BASE_DIR,
+    "servo_calibration_result.json",
+)
 
 
 # ============================================================
