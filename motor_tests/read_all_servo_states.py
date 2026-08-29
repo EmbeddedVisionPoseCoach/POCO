@@ -130,38 +130,11 @@ LOCAL_SDK_CANDIDATES = [
     / "scservo_sdk",
 ]
 
+
 try:
-    from scservo_sdk.port_handler import PortHandler
-    from scservo_sdk.sms_sts import sms_sts
-    from scservo_sdk.scservo_def import COMM_SUCCESS
-
-except ModuleNotFoundError:
-    sdk_found = False
-
-    for sdk_path in LOCAL_SDK_CANDIDATES:
-        if sdk_path.exists():
-            sdk_parent = str(sdk_path.parent)
-            sdk_dir = str(sdk_path)
-
-            # 1) scservo_sdk 패키지 자체를 찾기 위한 상위 경로 등록
-            if sdk_parent not in sys.path:
-                sys.path.insert(0, sdk_parent)
-
-            # 2) SDK 내부 모듈(scservo_def 등)이 서로를 바로 import 할 수 있도록 SDK 폴더 자체도 등록
-            if sdk_dir not in sys.path:
-                sys.path.insert(0, sdk_dir)
-
-            sdk_found = True
-            break
-
-    if not sdk_found:
-        print()
-        print("============================================================")
-        print("[FAIL] STServo SDK를 찾을 수 없습니다.")
-        print("============================================================")
-        print("pip 설치 또는 프로젝트의 STServo_Python 경로를 확인하세요.")
-        raise SystemExit(1)
-
+    # from WorkSpace.hardware.stservo_env.scservo_sdk.port_handler import PortHandler
+    # from WorkSpace.hardware.stservo_env.scservo_sdk.sms_sts import sms_sts
+    # from WorkSpace.hardware.stservo_env.scservo_sdk.scservo_def import COMM_SUCCESS
     from scservo_sdk.port_handler import PortHandler
     from scservo_sdk.sms_sts import sms_sts
     from scservo_sdk.scservo_def import COMM_SUCCESS
