@@ -1,7 +1,9 @@
 import time
 from dataclasses import dataclass
 
+from services.monitor_arm_kinematics import JointCommand
 from services.monitor_arm_planner import MonitorArmPlanner
+from services.monitor_arm_speed import select_speed, validate_speed_profile
 
 MOTOR1_SERVO_ID = 1
 MOTOR1_JOINT = "shoulder_lift"
@@ -37,7 +39,8 @@ class Motor12Controller:
     max_speed / Safe Range / Ping 검사를 통과해야 ready=True가 된다.
 
     MonitorArmPlanner는 전달받은 고정 settings로 생성한다.
-    실제 ToF 입력 / 속도 선택 / SyncWrite 제어는 이후 단계에서 연결한다.
+    일반 추종 목표의 속도 선택 / SyncWrite 실행 경로를 내부에 유지하며,
+    실제 ToF/융합 user_x 입력과 Planner 자동 호출은 이후 단계에서 연결한다.
     """
 
     def __init__(self, motor_service, settings=None, update_hz=MOTOR12_UPDATE_HZ):
@@ -50,7 +53,68 @@ class Motor12Controller:
 
         self.settings = settings
         self.planner = MonitorArmPlanner(settings) if settings is not None else None
-        
+
+        # 팀원 standalone Motor1/2 코드의 Pose 추종 속도 정책을 그대로 사용한다.
+        # settings=None은 기존 self-test 호환용이며 실제 HardwareProcess에서는
+        # WorkSpace/config/monitor_arm_settings.json이 항상 전달된다.
+        self.pose_max_speed = None
+        self.pose_acc = None
+        self.pose_speed_mode = None
+        self.pose_min_speed = None
+        self.pose_full_speed_error_deg = None
+
+        if settings is not None:
+            control = settings.get("control", {})
+
+            self.pose_max_speed = int(
+                control.get(
+                    "pose_speed",
+                    control.get("vertical_ik_speed", control.get("speed", 1)),
+                )
+            )
+            self.pose_acc = int(
+                control.get(
+                    "pose_acc",
+                    control.get("vertical_ik_acc", control.get("acc", 10)),
+                )
+            )
+            self.pose_speed_mode = str(
+                control.get(
+                    "pose_speed_mode",
+                    control.get("vertical_ik_speed_mode", "fixed"),
+                )
+            )
+            self.pose_min_speed = int(
+                control.get(
+                    "pose_variable_min_speed",
+                    control.get("vertical_ik_variable_min_speed", 1),
+                )
+            )
+            self.pose_full_speed_error_deg = float(
+                control.get(
+                    "pose_variable_full_speed_error_deg",
+                    min(
+                        float(
+                            control.get(
+                                "vertical_ik_variable_full_speed_error_deg",
+                                30.0,
+                            )
+                        ),
+                        float(settings["safety"]["max_joint_step_deg"]),
+                    ),
+                )
+            )
+
+            validate_speed_profile(
+                self.pose_speed_mode,
+                self.pose_max_speed,
+                self.pose_min_speed,
+                self.pose_full_speed_error_deg,
+            )
+
+            if not 0 <= self.pose_acc <= 30:
+                raise ValueError("Motor1/2 pose_acc 허용범위는 0~30입니다.")
+            
         self.update_hz = max(1.0, float(update_hz))
         self.update_interval = 1.0 / self.update_hz
         self.last_update_time = 0.0
@@ -186,6 +250,16 @@ class Motor12Controller:
             )
 
         axis.max_speed = int(max_speed)
+
+        if (
+            self.pose_max_speed is not None
+            and self.pose_max_speed > axis.max_speed
+        ):
+            raise RuntimeError(
+                f"{axis.joint} pose_speed={self.pose_max_speed}가 "
+                f"Calibration max_speed={axis.max_speed}보다 큽니다."
+            )
+    
         axis.safe_min_deg = safe_min_deg
         axis.safe_max_deg = safe_max_deg
         axis.ready = True
@@ -204,11 +278,114 @@ class Motor12Controller:
         self.motor1.reset_ready()
         self.motor2.reset_ready()
 
+    def _calibration_ranges(self):
+        """Motor1/2의 현재 Calibration 안전각 범위를 반환한다."""
+        if (
+            self.motor1.safe_min_deg is None
+            or self.motor1.safe_max_deg is None
+            or self.motor2.safe_min_deg is None
+            or self.motor2.safe_max_deg is None
+        ):
+            raise RuntimeError("Motor1/2 Safe Range가 준비되지 않았습니다.")
+
+        return {
+            MOTOR1_JOINT: (
+                float(self.motor1.safe_min_deg),
+                float(self.motor1.safe_max_deg),
+            ),
+            MOTOR2_JOINT: (
+                float(self.motor2.safe_min_deg),
+                float(self.motor2.safe_max_deg),
+            ),
+        }
+
+    def _read_current_angles(self):
+        """Motor1/2 현재 TEAM 기준 각도를 함께 읽는다."""
+        shoulder = self.motor.get_joint_angle(MOTOR1_JOINT)
+        elbow = self.motor.get_joint_angle(MOTOR2_JOINT)
+
+        if shoulder is None or elbow is None:
+            raise RuntimeError("Servo 1·2 현재 각도를 읽지 못했습니다.")
+
+        return JointCommand(
+            shoulder_lift_deg=float(shoulder),
+            elbow_flex_deg=float(elbow),
+        )
+
+    def _select_tracking_speed(self, current, target):
+        """두 Joint 중 더 큰 목표각 오차를 기준으로 공통 Speed를 결정한다."""
+        if self.pose_max_speed is None:
+            raise RuntimeError("Motor12 모니터암 속도 설정이 준비되지 않았습니다.")
+
+        largest_delta = max(
+            abs(target.shoulder_lift_deg - current.shoulder_lift_deg),
+            abs(target.elbow_flex_deg - current.elbow_flex_deg),
+        )
+
+        speed = select_speed(
+            self.pose_speed_mode,
+            self.pose_max_speed,
+            self.pose_min_speed,
+            self.pose_full_speed_error_deg,
+            largest_delta,
+        )
+
+        return speed, largest_delta
+
+    def _move_normal_target(self, target):
+        """일반 자동추종 목표를 Motor1/2 SyncWrite로 전송한다.
+
+        Rest/Recovery처럼 Calibration 범위를 벗어나는 특수 자세는
+        이 경로로 보내지 않는다. 해당 기능은 별도 예외 경로로 유지한다.
+        """
+        target_angles = {
+            MOTOR1_JOINT: float(target.shoulder_lift_deg),
+            MOTOR2_JOINT: float(target.elbow_flex_deg),
+        }
+
+        calibration_ranges = self._calibration_ranges()
+
+        # 일반 자동추종에서는 Calibration 안전범위 밖의 목표를 명시적으로 차단한다.
+        # Rest/Recovery의 예외 이동과 일반 제어를 섞지 않기 위한 방어선이다.
+        for joint, angle in target_angles.items():
+            minimum, maximum = calibration_ranges[joint]
+
+            if not minimum <= angle <= maximum:
+                raise RuntimeError(
+                    f"일반 추종 목표 {joint}={angle:+.2f}°가 "
+                    f"Calibration 안전범위 "
+                    f"{minimum:+.2f}~{maximum:+.2f}° 밖입니다."
+                )
+
+        # 팀원 원본과 동일하게 실제 명령 직전에 현재각을 다시 읽고
+        # 두 축 중 큰 오차를 기준으로 하나의 공통 Speed를 선택한다.
+        current = self._read_current_angles()
+        speed, largest_delta = self._select_tracking_speed(current, target)
+
+        success = self.motor.move_joints(
+            target_angles,
+            speed=speed,
+            acc=self.pose_acc,
+            wait=False,
+        )
+
+        if not success:
+            raise RuntimeError(
+                self.motor.last_error
+                or "Servo 1·2 동기 이동 명령이 거부되었습니다."
+            )
+
+        return {
+            "accepted": True,
+            "speed": speed,
+            "largest_delta_deg": largest_delta,
+        }
+
     def update(self, context):
         """현재 단계에서는 상태 갱신만 수행한다.
 
-        실제 Motor1/2 제어는 Planner / ToF /
-        다축 SyncWrite 연결 단계에서 추가한다.
+        일반 추종 목표의 속도 계산/SyncWrite 내부 경로는 준비되어 있지만,
+        ToF/융합 user_x와 Planner 자동 호출은 이후 단계에서 연결한다.
         """
         now = float(
             context.get("now", time.monotonic())
