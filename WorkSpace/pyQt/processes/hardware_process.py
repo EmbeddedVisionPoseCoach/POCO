@@ -593,6 +593,98 @@ def run_hardware_process(
                     )
                     continue
 
+                if event_type == "MOTOR12_REST":
+                    # Rest는 Calibration Safe Range 밖의 특수 자세이므로
+                    # event에서 명시적인 사용자 확인이 있어야 실행한다.
+                    confirmed = bool(
+                        event.get(
+                            "confirmed",
+                            False,
+                        )
+                        if isinstance(event, dict)
+                        else False
+                    )
+
+                    if not confirmed:
+                        _put_hardware_event(
+                            hw_to_main_event_queue,
+                            "MOTOR12_REST_CONFIRM_REQUIRED",
+                            success=True,
+                            message=(
+                                "Motor1/2 Rest 자세는 "
+                                "Calibration 안전범위 밖의 "
+                                "확인된 특수 자세입니다. "
+                                "팔/모니터를 지지한 뒤 "
+                                "confirmed=True로 다시 요청해주세요."
+                            ),
+                        )
+                        continue
+
+                    result = (
+                        motor12.move_to_rest()
+                    )
+
+                    success = bool(
+                        result.get(
+                            "accepted",
+                            False,
+                        )
+                    )
+
+                    _put_hardware_event(
+                        hw_to_main_event_queue,
+                        "MOTOR12_REST_ACK",
+                        success=success,
+                        message=(
+                            "Motor1/2 Rest 자세 이동 "
+                            "명령을 전송했습니다."
+                            if success
+                            else
+                            "Motor1/2 Rest 자세 이동 실패: "
+                            + str(
+                                result.get(
+                                    "error",
+                                    "unknown error",
+                                )
+                            )
+                        ),
+                        result=result,
+                    )
+                    continue
+
+                if event_type == "MOTOR12_RESUME":
+                    result = (
+                        motor12.resume_from_rest()
+                    )
+
+                    success = bool(
+                        result.get(
+                            "accepted",
+                            False,
+                        )
+                    )
+
+                    _put_hardware_event(
+                        hw_to_main_event_queue,
+                        "MOTOR12_RESUME_ACK",
+                        success=success,
+                        message=(
+                            "Motor1/2 작업자세 Recovery를 "
+                            "시작합니다."
+                            if success
+                            else
+                            "Motor1/2 Recovery 시작 실패: "
+                            + str(
+                                result.get(
+                                    "error",
+                                    "unknown error",
+                                )
+                            )
+                        ),
+                        result=result,
+                    )
+                    continue
+
                 _put_hardware_event(
                     hw_to_main_event_queue,
                     "HARDWARE_EVENT_ACK",

@@ -689,21 +689,10 @@ class MotorController:
             acc = self.calibration.validate_acc(acc)
 
             for joint_name, angle in targets.items():
-                joint_speed = (
-                    self.calibration.validate_speed(
-                        joint_name,
-                        speed,
-                    )
-                )
+                joint_speed = (self.calibration.validate_speed(joint_name, speed, ))
 
                 # Safe Range만 생략하고 STS 절대범위는 검사한다.
-                target_position = (
-                    self.calibration
-                    .command_angle_to_position_absolute_only(
-                        joint_name,
-                        angle,
-                    )
-                )
+                target_position = (self.calibration.command_angle_to_position_absolute_only(joint_name, angle, ))
 
                 servo = self.calibration.get_joint(joint_name)
                 servo_id = int(servo["servo_id"])
@@ -726,18 +715,10 @@ class MotorController:
             if not self._check_motion_allowed():
                 return False
 
-            success = (
-                self.driver.sync_write_positions(
-                    sync_commands
-                )
-            )
+            success = (self.driver.sync_write_positions(sync_commands))
 
             if success:
-                expected_generations = (
-                    self._bump_command_generations(
-                        wait_targets.keys()
-                    )
-                )
+                expected_generations = (self._bump_command_generations(wait_targets.keys()))
             else:
                 expected_generations = None
 
