@@ -16,7 +16,7 @@ class MotorService:
     - MotorController / Serial 포트 1회 생성
     - Joint ping
     - 현재 각도 읽기
-    - 절대/상대 각도 이동
+    - 절대/상대/다축 동기 각도 이동
     - Calibration 정보 조회
 
     Motor1/2 로직과 Motor3/4 로직은 각각 Controller 클래스에서 담당한다.
@@ -176,6 +176,36 @@ class MotorService:
                     **kwargs,
                 )
             )
+        except Exception as error:
+            self.last_error = str(error)
+            return False
+
+    def move_joints(self, targets, speed, acc=None, wait=False):
+        """여러 Joint를 하나의 SyncWrite 명령으로 동시에 이동한다.
+
+        이 메서드는 목표각/속도/가속도를 판단하지 않고 MotorController에 그대로 전달한다.
+        Motor1/2의 IK, 속도 선택, Rest/Recovery 판단은 Motor12Controller에서 담당한다.
+        acc=None이면 기존 MotorController의 기본 Acc를 그대로 사용한다.
+        """
+        if not self.available or self.arm is None:
+            self.last_error = "Motor bus unavailable"
+            return False
+
+        try:
+            kwargs = {
+                "targets": {
+                    str(joint_name): float(angle)
+                    for joint_name, angle in dict(targets).items()
+                },
+                "speed": int(speed),
+                "wait": bool(wait),
+            }
+
+            if acc is not None:
+                kwargs["acc"] = int(acc)
+
+            return bool(self.arm.move_joints(**kwargs))
+
         except Exception as error:
             self.last_error = str(error)
             return False
