@@ -620,9 +620,7 @@ def run_hardware_process(
                         )
                         continue
 
-                    result = (
-                        motor12.move_to_rest()
-                    )
+                    result = (motor12.move_to_rest())
 
                     success = bool(
                         result.get(
@@ -653,9 +651,7 @@ def run_hardware_process(
                     continue
 
                 if event_type == "MOTOR12_RESUME":
-                    result = (
-                        motor12.resume_from_rest()
-                    )
+                    result = (motor12.resume_from_rest())
 
                     success = bool(
                         result.get(
