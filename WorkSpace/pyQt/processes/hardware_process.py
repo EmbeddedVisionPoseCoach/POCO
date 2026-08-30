@@ -1,4 +1,6 @@
+import json
 import time
+from pathlib import Path
 
 from ipc.queue_utils import drain_ordered, get_latest, put_latest, put_ordered
 from services.hardware_config_service import HardwareConfigService
@@ -10,6 +12,9 @@ from services.motor34_controller import Motor34Controller
 
 HARDWARE_STATUS_INTERVAL_SEC = 0.05
 HARDWARE_LOOP_SLEEP_SEC = 0.002
+
+WORKSPACE_DIR = Path(__file__).resolve().parents[2]
+MONITOR_ARM_SETTINGS_FILE = WORKSPACE_DIR / "config" / "monitor_arm_settings.json"
 
 HW_IDLE = "IDLE"
 HW_IMU_OFFSET_CALIBRATING = "IMU_OFFSET_CALIBRATING"
@@ -45,6 +50,26 @@ def _extract_pose_landmark_state(pose_state):
     valid = bool(pose_state.get("landmark_valid", False))
     landmarks = pose_state.get("landmarks") if valid else None
     return frame_id, landmarks, valid
+
+def _load_monitor_arm_settings():
+    """Motor1/2 모니터암의 고정 프로젝트 설정을 한 번 읽는다.
+
+    hardware_control.json은 PyQt에서 바꿀 수 있는 런타임 튜닝값이고,
+    monitor_arm_settings.json은 팀원 모니터암 알고리즘의 고정 기구/안전 설정이므로
+    서로 섞지 않고 별도 파일로 유지한다.
+    """
+    if not MONITOR_ARM_SETTINGS_FILE.exists():
+        raise FileNotFoundError(
+            f"모니터암 설정 파일이 없습니다: {MONITOR_ARM_SETTINGS_FILE}"
+        )
+
+    with MONITOR_ARM_SETTINGS_FILE.open("r", encoding="utf-8") as file:
+        settings = json.load(file)
+
+    if not isinstance(settings, dict):
+        raise ValueError("모니터암 설정 파일의 최상위 값은 JSON object여야 합니다.")
+
+    return settings
 
 
 def run_hardware_process(
@@ -87,13 +112,17 @@ def run_hardware_process(
     config_service = HardwareConfigService()
     config_data = config_service.load()
     control = config_data["control"]
+    monitor_arm_settings = _load_monitor_arm_settings()
 
     # 생성자는 JSON이 아니라 코드 상수 기본값으로 초기화된다.
     imu = ADXL345IMUService()
     motor_service = MotorService()
 
     # 실제 제어 로직은 별도 Controller로 분리한다.
-    motor12 = Motor12Controller(motor_service)
+    motor12 = Motor12Controller(
+        motor_service,
+        settings=monitor_arm_settings,
+    )
     motor34 = Motor34Controller(motor_service)
 
     # JSON에는 사용자가 바꿀 튜닝값만 있다.

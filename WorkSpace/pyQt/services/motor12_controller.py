@@ -1,6 +1,8 @@
 import time
 from dataclasses import dataclass
 
+from services.monitor_arm_planner import MonitorArmPlanner
+
 MOTOR1_SERVO_ID = 1
 MOTOR1_JOINT = "shoulder_lift"
 MOTOR2_SERVO_ID = 2
@@ -34,12 +36,21 @@ class Motor12Controller:
     두 Servo는 필수 하드웨어이므로 둘 다 Calibration / Servo ID /
     max_speed / Safe Range / Ping 검사를 통과해야 ready=True가 된다.
 
-    실제 IK / ToF / 속도 선택 / SyncWrite 제어는 이후 단계에서 연결한다.
-    현재 단계에서는 하드웨어 준비 상태와 공통 state 구조만 관리한다.
+    MonitorArmPlanner는 전달받은 고정 settings로 생성한다.
+    실제 ToF 입력 / 속도 선택 / SyncWrite 제어는 이후 단계에서 연결한다.
     """
 
-    def __init__(self, motor_service, update_hz=MOTOR12_UPDATE_HZ):
+    def __init__(self, motor_service, settings=None, update_hz=MOTOR12_UPDATE_HZ):
         self.motor = motor_service
+
+        # settings=None은 기존 self-test 호환을 위해 임시로 허용한다.
+        # 실제 HardwareProcess에서는 WorkSpace/config의 고정 JSON을 항상 전달한다.
+        if settings is not None and not isinstance(settings, dict):
+            raise TypeError("Motor12 settings는 dict 또는 None이어야 합니다.")
+
+        self.settings = settings
+        self.planner = MonitorArmPlanner(settings) if settings is not None else None
+        
         self.update_hz = max(1.0, float(update_hz))
         self.update_interval = 1.0 / self.update_hz
         self.last_update_time = 0.0
