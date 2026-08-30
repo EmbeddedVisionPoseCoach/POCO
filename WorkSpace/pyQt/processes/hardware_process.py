@@ -2,12 +2,21 @@ import json
 import time
 from pathlib import Path
 
+from modules.config import FRAME_HEIGHT, FRAME_WIDTH
+
 from ipc.queue_utils import drain_ordered, get_latest, put_latest, put_ordered
 from services.hardware_config_service import HardwareConfigService
 from services.imu_service import ADXL345IMUService
+from services.monitor_arm_user_x import (
+    EyeGapVisionDistanceEstimator,
+    ToFUserXSource,
+    UserXFusion,
+    measure_pose_eye_gap,
+)
 from services.motor_service import MotorService
 from services.motor12_controller import Motor12Controller
 from services.motor34_controller import Motor34Controller
+from services.tof_service import create_tof_service
 
 
 HARDWARE_STATUS_INTERVAL_SEC = 0.05
@@ -114,6 +123,75 @@ def run_hardware_process(
     control = config_data["control"]
     monitor_arm_settings = _load_monitor_arm_settings()
 
+    # --------------------------------------------------------
+    # Motor1/2 사용자 위치 입력
+    # --------------------------------------------------------
+    # 실제 ToF I2C 통신은 tof_service.py가 담당하고,
+    # 이 HardwareProcess에서는 거리값을 base-user X로 변환한 뒤
+    # 기존 Pose landmark의 눈 간격 기반 Vision 거리와 융합한다.
+    tof_cfg = monitor_arm_settings["tof"]
+    fusion_cfg = monitor_arm_settings.get("fusion", {},)
+
+    tof_service = create_tof_service(tof_cfg)
+
+    tof_source = ToFUserXSource(
+        sensor_service=tof_service,
+        sensor_origin_x_m=float(
+            tof_cfg.get(
+                "sensor_origin_x_m",
+                0.0,
+            )
+        ),
+        minimum_user_x_m=float(
+            tof_cfg["minimum_user_x_m"]
+        ),
+        maximum_user_x_m=float(
+            tof_cfg["maximum_user_x_m"]
+        ),
+    )
+
+    vision_estimator = EyeGapVisionDistanceEstimator(
+        minimum_eye_gap_px=float(
+            fusion_cfg.get(
+                "minimum_eye_gap_px",
+                5.0,
+            )
+        ),
+        minimum_distance_m=float(
+            fusion_cfg.get(
+                "minimum_vision_distance_m",
+                0.25,
+            )
+        ),
+        maximum_distance_m=float(
+            fusion_cfg.get(
+                "maximum_vision_distance_m",
+                1.2,
+            )
+        ),
+        filter_alpha=float(
+            fusion_cfg.get(
+                "vision_filter_alpha",
+                0.25,
+            )
+        ),
+    )
+
+    user_x_fusion = UserXFusion(
+        tof_weight=float(
+            fusion_cfg.get(
+                "tof_weight",
+                0.7,
+            )
+        ),
+        vision_weight=float(
+            fusion_cfg.get(
+                "vision_weight",
+                0.3,
+            )
+        ),
+    )
+
     # 생성자는 JSON이 아니라 코드 상수 기본값으로 초기화된다.
     imu = ADXL345IMUService()
     motor_service = MotorService()
@@ -130,6 +208,12 @@ def run_hardware_process(
     motor34.apply_control_config(control["motor"])
 
     imu_opened = imu.open()
+
+    # 실제 VL53L0X import/I2C 연결은 ToF Service의 open() 안에서 수행한다.
+    # 센서 초기화가 실패해도 HardwareProcess 자체는 종료하지 않고,
+    # 아래 user-X 상태를 SAFE_HOLD로 유지한다.
+    tof_opened = tof_source.open()
+
     motor_bus_opened = motor_service.open()
 
     # Motor1/2와 Motor3/4는 모두 필수 하드웨어다.
@@ -147,6 +231,30 @@ def run_hardware_process(
     )
 
     latest_imu_state = dict(imu.latest_state)
+
+    # 시작 직후 ToF 상태도 한 번 읽어 Hardware state에 반영한다.
+    latest_tof_state = dict(tof_service.update(force=True))
+
+    latest_monitor_arm_input_state = {
+        "available": bool(tof_opened),
+        "valid": False,
+        "tof_user_x_m": None,
+        "vision_user_x_m": None,
+        "user_x_m": None,
+        "fusion_mode": "SAFE_HOLD",
+        "eye_gap_px": None,
+        "last_error": (
+            None
+            if tof_opened
+            else getattr(
+                tof_service,
+                "last_error",
+                "ToF unavailable",
+            )
+        ),
+        "timestamp": time.time(),
+    }
+
     latest_motor12_state = dict(motor12.latest_state)
     latest_motor34_state = dict(motor34.latest_state)
 
@@ -515,6 +623,11 @@ def run_hardware_process(
             # ==================================================
             now = time.monotonic()
 
+            # ToF Service 내부에서 sample_hz를 기준으로 자체 rate-limit한다.
+            # 따라서 Hardware loop에서는 항상 update()를 호출해도
+            # 실제 I2C read는 설정된 주기로만 수행된다.
+            latest_tof_state = tof_service.update()
+
 
             if now - last_imu_sample_time >= imu.sample_interval:
                 last_imu_sample_time = now
@@ -587,6 +700,137 @@ def run_hardware_process(
                     )
 
             # ==================================================
+            # F-1. Motor1/2 ToF + Vision 사용자 X 계산
+            # ==================================================
+            tof_user_x_m = None
+            fused_user_x_m = None
+            input_error = None
+            fusion_mode = "SAFE_HOLD"
+
+            # 팀원 원본 안전정책:
+            # - ToF가 없으면 Vision 단독 Motor 제어 금지 → SAFE_HOLD
+            # - Vision이 없으면 ToF 단독 사용 가능
+            try:
+                tof_user_x_m = (
+                    tof_source.read_user_x_m()
+                )
+
+            except ValueError as error:
+                # ToF가 유효하지 않으면 Vision 값을 사용하지 않는다.
+                latest_vision_user_x_m = None
+                latest_eye_gap_px = None
+                input_error = str(error)
+
+            else:
+                # Pose Process보다 Hardware loop가 훨씬 빠르므로
+                # 새 Pose frame에서만 Vision EMA를 한 번 갱신한다.
+                if (
+                    latest_pose_landmark_valid
+                    and latest_pose_frame_id
+                    != last_vision_pose_frame_id
+                ):
+                    last_vision_pose_frame_id = (
+                        latest_pose_frame_id
+                    )
+
+                    eye = measure_pose_eye_gap(
+                        latest_pose_landmarks,
+                        FRAME_WIDTH,
+                        FRAME_HEIGHT,
+                    )
+
+                    latest_eye_gap_px = (
+                        None
+                        if eye is None
+                        else float(eye.gap_px)
+                    )
+
+                    latest_vision_user_x_m = None
+
+                    if eye is not None:
+                        try:
+                            (
+                                _current_angles,
+                                current_monitor_pose,
+                            ) = motor12.read_current_arm_state()
+
+                            # 팀원 원본과 동일하게 첫 Vision 기준거리는
+                            # 현재 ToF user X - 현재 Monitor X로 보정한다.
+                            if not vision_estimator.calibrated:
+                                vision_estimator.calibrate(
+                                    eye.gap_px,
+                                    tof_user_x_m
+                                    - current_monitor_pose.x_m,
+                                )
+
+                            vision_distance_m = (
+                                vision_estimator
+                                .estimate_distance_m(
+                                    eye.gap_px
+                                )
+                            )
+
+                            latest_vision_user_x_m = float(
+                                current_monitor_pose.x_m
+                                + vision_distance_m
+                            )
+
+                        except (
+                            RuntimeError,
+                            ValueError,
+                        ):
+                            # 눈 landmark 또는 Motor 현재각이 순간적으로
+                            # 유효하지 않아도 ToF 단독 제어는 허용한다.
+                            latest_vision_user_x_m = None
+
+                elif not latest_pose_landmark_valid:
+                    latest_eye_gap_px = None
+                    latest_vision_user_x_m = None
+
+                try:
+                    fused_user_x_m = (
+                        tof_source.validate_user_x_m(
+                            user_x_fusion.fuse(
+                                tof_user_x_m,
+                                latest_vision_user_x_m,
+                            )
+                        )
+                    )
+
+                    fusion_mode = (
+                        "FUSED"
+                        if latest_vision_user_x_m
+                        is not None
+                        else "TOF_ONLY"
+                    )
+
+                except ValueError as error:
+                    fused_user_x_m = None
+                    input_error = str(error)
+
+            latest_monitor_arm_input_state = {
+                "available": bool(
+                    getattr(
+                        tof_service,
+                        "available",
+                        False,
+                    )
+                ),
+                "valid": (
+                    fused_user_x_m is not None
+                ),
+                "tof_user_x_m": tof_user_x_m,
+                "vision_user_x_m": (
+                    latest_vision_user_x_m
+                ),
+                "user_x_m": fused_user_x_m,
+                "fusion_mode": fusion_mode,
+                "eye_gap_px": latest_eye_gap_px,
+                "last_error": input_error,
+                "timestamp": time.time(),
+            }
+
+            # ==================================================
             # F. Motor control context
             # ==================================================
             imu_ready = bool(
@@ -612,10 +856,6 @@ def run_hardware_process(
             # 실행 순서가 코드에 그대로 보이도록 유지한다.
             latest_motor12_state = motor12.update(context)   # Motor 1 -> 2
             latest_motor34_state = motor34.update(context)   # Motor 3 -> 4
-
-            # MediaPipe landmark는 현재 수신만 한다.
-            if latest_pose_landmark_valid:
-                pass
 
             # 기존 Motor3/4 최상위 진단값(command_hz, axis_mapping 등)은
             # 호환성을 위해 유지한다. 대신 available/enabled/ready/control_active는
@@ -693,6 +933,8 @@ def run_hardware_process(
                     "face_enabled": bool(enable_face),
                     "face_state_received": latest_face_state is not None if enable_face else False,
                     "imu": dict(latest_imu_state),
+                    "tof": dict(latest_tof_state),
+                    "monitor_arm_input": dict(latest_monitor_arm_input_state),
                     "motor": latest_motor_state,
                     "gimbal": {
                         "requested": motor34_requested,
@@ -714,8 +956,10 @@ def run_hardware_process(
             time.sleep(HARDWARE_LOOP_SLEEP_SEC)
 
     finally:
+        # HardwareProcess가 소유한 I2C/Serial 장치를 모두 정리한다.
         # 각 Controller의 runtime 상태를 먼저 정리한 뒤
         # 공통 MotorService Serial bus를 마지막에 닫는다.
+        tof_source.close()
         motor12.close()
         motor34.close()
         motor_service.close()

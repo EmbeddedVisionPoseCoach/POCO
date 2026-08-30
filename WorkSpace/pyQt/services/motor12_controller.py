@@ -312,6 +312,27 @@ class Motor12Controller:
             elbow_flex_deg=float(elbow),
         )
 
+    def read_current_arm_state(self):
+        """현재 Motor1/2 관절각과 그 자세의 모니터 위치를 함께 읽는다.
+
+        HardwareProcess의 ToF + Vision 사용자 위치 계산에서는
+        Vision 카메라 거리값을 base-user X로 바꾸기 위해 현재 모니터 X가 필요하다.
+
+        Servo 현재각 읽기와 Forward Kinematics는 Motor12/Planner 영역에
+        유지하고, HardwareProcess에는 계산된 현재 상태만 전달한다.
+        """
+        if self.planner is None:
+            raise RuntimeError(
+                "MonitorArmPlanner가 준비되지 않았습니다."
+            )
+
+        current = self._read_current_angles()
+        monitor_pose = self.planner.kinematics.forward(
+            current
+        )
+
+        return current, monitor_pose
+
     def _select_tracking_speed(self, current, target):
         """두 Joint 중 더 큰 목표각 오차를 기준으로 공통 Speed를 결정한다."""
         if self.pose_max_speed is None:
