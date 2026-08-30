@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
-"""ToF user-X + MediaPipe Pose based two-motor monitor-arm controller.
+"""ToF + MediaPipe Pose fusion based two-motor monitor-arm controller.
 
 Runtime flow
 ------------
 1. Pose Landmarker processes camera frames for the future posture gate.
-2. A ToF source supplies the user's absolute +X coordinate from the base.
-3. Monitor X is user X minus the configured user-monitor distance.
-4. A two-joint IK target is calculated for shoulder_lift and elbow_flex only.
-5. Calibration hard limits, editable soft limits, and the complete interpolated
+2. HW-843 ToF supplies a filtered torso X coordinate from the base.
+3. Pose eye gap supplies an independent camera-distance estimate.
+4. The two user-X estimates are fused (default ToF 0.7 + vision 0.3).
+5. Monitor X is fused user X minus the configured user-monitor distance.
+6. A two-joint IK target is calculated for shoulder_lift and elbow_flex only.
+7. Calibration hard limits, editable soft limits, and the complete interpolated
    vertical path are checked before a command is sent. Normal tracking can send
    the final IK target directly; the legacy maximum-step mode remains selectable.
-6. In motor mode, only the resulting two angles cross into a motor process;
+8. In motor mode, only the resulting two angles cross into a motor process;
    that child process exclusively owns serial reads and writes.
 
 The script starts in simulation mode.  Pass --enable-motor only after manual
@@ -21,11 +23,19 @@ from __future__ import annotations
 
 import argparse
 import math
+import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from monitor_arm_kinematics import (
+
+ROOT_DIR = Path(__file__).resolve().parent
+WORKSPACE_DIR = ROOT_DIR.parent.parent
+PYQT_DIR = WORKSPACE_DIR / "pyQt"
+if str(PYQT_DIR) not in sys.path:
+    sys.path.insert(0, str(PYQT_DIR))
+
+from services.monitor_arm_kinematics import (
     ArmGeometry,
     JointCommand,
     KinematicsError,
@@ -35,12 +45,12 @@ from monitor_arm_kinematics import (
     load_settings,
     monitor_target_from_user,
 )
+from services.tof_service import FixedToFSensorService, create_tof_service
 from monitor_arm_motor_process import MotorControlProcessClient
 
 
-ROOT_DIR = Path(__file__).resolve().parent
-DEFAULT_MODEL_PATH = ROOT_DIR / "tasks" / "pose_landmarker_heavy.task"
-DEFAULT_CALIBRATION_PATH = ROOT_DIR / "servo_calibration_result.json"
+DEFAULT_MODEL_PATH = WORKSPACE_DIR / "tasks" / "pose_landmarker_heavy.task"
+DEFAULT_CALIBRATION_PATH = WORKSPACE_DIR / "hardware" / "servo_calibration_result.json"
 LEFT_EYE_INDEX = 2
 RIGHT_EYE_INDEX = 5
 
@@ -52,34 +62,36 @@ class EyeMeasurement:
     right_xy: tuple[int, int]
 
 
-class FixedToFUserXSource:
-    """Temporary ToF stand-in returning user X from a fixed sensor range.
-
-    A real ToF adapter only needs to replace ``read_range_m()``. The coordinate
-    conversion and range validation can remain unchanged.
-    """
+class ToFUserXSource:
+    """ToF service distance를 base 좌표계의 사용자 X로 변환한다."""
 
     def __init__(
         self,
+        sensor_service,
         sensor_origin_x_m: float,
-        fixed_range_m: float,
         minimum_user_x_m: float,
         maximum_user_x_m: float,
     ):
+        self.sensor_service = sensor_service
         self.sensor_origin_x_m = float(sensor_origin_x_m)
-        self.fixed_range_m = float(fixed_range_m)
         self.minimum_user_x_m = float(minimum_user_x_m)
         self.maximum_user_x_m = float(maximum_user_x_m)
         if self.minimum_user_x_m > self.maximum_user_x_m:
             raise ValueError("ToF 사용자 X 최소값이 최대값보다 큽니다.")
 
-    def read_range_m(self) -> float:
-        """Return fixed data until the real ToF driver is connected."""
-        return self.fixed_range_m
+    def open(self) -> bool:
+        return bool(self.sensor_service.open())
+
+    def close(self) -> None:
+        self.sensor_service.close()
 
     def read_user_x_m(self) -> float:
-        range_m = float(self.read_range_m())
+        range_m = float(self.sensor_service.read_distance_m())
         user_x_m = self.sensor_origin_x_m + range_m
+        return self.validate_user_x_m(user_x_m)
+
+    def validate_user_x_m(self, user_x_m: float) -> float:
+        user_x_m = float(user_x_m)
         if not math.isfinite(user_x_m):
             raise ValueError("ToF 사용자 X가 유한한 값이 아닙니다.")
         if not self.minimum_user_x_m <= user_x_m <= self.maximum_user_x_m:
@@ -88,6 +100,125 @@ class FixedToFUserXSource:
                 f"{self.minimum_user_x_m:.3f}~{self.maximum_user_x_m:.3f}m 밖입니다."
             )
         return user_x_m
+
+
+class FixedToFUserXSource(ToFUserXSource):
+    """기존 시험 API를 보존하면서 새 ToF 서비스 모듈을 사용하는 어댑터."""
+
+    def __init__(
+        self,
+        sensor_origin_x_m: float,
+        fixed_range_m: float,
+        minimum_user_x_m: float,
+        maximum_user_x_m: float,
+    ):
+        service = FixedToFSensorService(fixed_range_m)
+        service.open()
+        super().__init__(
+            service,
+            sensor_origin_x_m,
+            minimum_user_x_m,
+            maximum_user_x_m,
+        )
+
+
+class EyeGapVisionDistanceEstimator:
+    """첫 눈 간격을 기준으로 핀홀 카메라의 반비례 거리값을 계산한다.
+
+    같은 사람과 같은 카메라에서는 ``눈 간격 픽셀값 * 실제 거리``가 거의
+    일정하다는 원리를 사용한다. ToF를 기준으로 첫 프레임을 자동 보정한다.
+    """
+
+    def __init__(
+        self,
+        minimum_eye_gap_px: float,
+        minimum_distance_m: float,
+        maximum_distance_m: float,
+        filter_alpha: float = 0.25,
+    ):
+        self.minimum_eye_gap_px = float(minimum_eye_gap_px)
+        self.minimum_distance_m = float(minimum_distance_m)
+        self.maximum_distance_m = float(maximum_distance_m)
+        self.filter_alpha = float(filter_alpha)
+        if self.minimum_eye_gap_px <= 0.0:
+            raise ValueError("minimum_eye_gap_px는 0보다 커야 합니다.")
+        if self.minimum_distance_m >= self.maximum_distance_m:
+            raise ValueError("비전 최소 거리는 최대 거리보다 작아야 합니다.")
+        if not 0.0 < self.filter_alpha <= 1.0:
+            raise ValueError("vision filter_alpha는 0 초과 1 이하여야 합니다.")
+        self.reference_gap_px: float | None = None
+        self.reference_distance_m: float | None = None
+        self.filtered_distance_m: float | None = None
+
+    @property
+    def calibrated(self) -> bool:
+        return self.reference_gap_px is not None
+
+    def reset(self) -> None:
+        self.reference_gap_px = None
+        self.reference_distance_m = None
+        self.filtered_distance_m = None
+
+    def calibrate(self, eye_gap_px: float, reference_distance_m: float) -> None:
+        gap = float(eye_gap_px)
+        distance = float(reference_distance_m)
+        if gap < self.minimum_eye_gap_px:
+            raise ValueError(f"눈 간격 {gap:.1f}px가 너무 작아 기준 보정을 할 수 없습니다.")
+        if not self.minimum_distance_m <= distance <= self.maximum_distance_m:
+            raise ValueError(
+                f"비전 기준거리 {distance:.3f}m가 허용범위 "
+                f"{self.minimum_distance_m:.3f}~{self.maximum_distance_m:.3f}m 밖입니다."
+            )
+        self.reference_gap_px = gap
+        self.reference_distance_m = distance
+        self.filtered_distance_m = distance
+
+    def estimate_distance_m(self, eye_gap_px: float) -> float:
+        if not self.calibrated or self.reference_distance_m is None:
+            raise ValueError("비전 눈 간격 기준이 아직 보정되지 않았습니다.")
+        gap = float(eye_gap_px)
+        if not math.isfinite(gap) or gap < self.minimum_eye_gap_px:
+            raise ValueError(f"유효하지 않은 눈 간격입니다: {gap:.1f}px")
+        distance = self.reference_distance_m * self.reference_gap_px / gap
+        if not self.minimum_distance_m <= distance <= self.maximum_distance_m:
+            raise ValueError(
+                f"비전 거리 {distance:.3f}m가 허용범위 "
+                f"{self.minimum_distance_m:.3f}~{self.maximum_distance_m:.3f}m 밖입니다."
+            )
+        if self.filtered_distance_m is None:
+            self.filtered_distance_m = distance
+        else:
+            alpha = self.filter_alpha
+            self.filtered_distance_m = (
+                alpha * distance + (1.0 - alpha) * self.filtered_distance_m
+            )
+        return self.filtered_distance_m
+
+
+class UserXFusion:
+    """ToF와 비전을 동일한 base-user X 좌표로 만든 뒤 가중 평균한다."""
+
+    def __init__(self, tof_weight: float = 0.7, vision_weight: float = 0.3):
+        self.tof_weight = float(tof_weight)
+        self.vision_weight = float(vision_weight)
+        if self.tof_weight < 0.0 or self.vision_weight < 0.0:
+            raise ValueError("센서 융합 가중치는 음수일 수 없습니다.")
+        total = self.tof_weight + self.vision_weight
+        if total <= 0.0:
+            raise ValueError("센서 융합 가중치 합은 0보다 커야 합니다.")
+        self.tof_weight /= total
+        self.vision_weight /= total
+
+    def fuse(self, tof_user_x_m: float, vision_user_x_m: float | None) -> float:
+        tof_x = float(tof_user_x_m)
+        if not math.isfinite(tof_x):
+            raise ValueError("ToF 사용자 X가 유한한 값이 아닙니다.")
+        if vision_user_x_m is None:
+            return tof_x
+        vision_x = float(vision_user_x_m)
+        if not math.isfinite(vision_x):
+            return tof_x
+        return self.tof_weight * tof_x + self.vision_weight * vision_x
 
 
 class MonitorArmPlanner:
@@ -372,21 +503,31 @@ def run() -> None:
             "opencv-python과 mediapipe를 설치한 Python 환경에서 실행하세요."
         ) from error
 
-    distance_cfg = settings["distance"]
     tof_cfg = settings["tof"]
-    if str(tof_cfg.get("mode", "fixed_stub")) != "fixed_stub":
-        raise ValueError("현재 구현된 ToF mode는 fixed_stub뿐입니다.")
     sensor_origin_x_m = float(tof_cfg.get("sensor_origin_x_m", 0.0))
-    fixed_range_m = float(tof_cfg["fixed_range_m"])
+    fixed_range_override_m = None
     if args.tof_user_x_m is not None:
-        fixed_range_m = float(args.tof_user_x_m) - sensor_origin_x_m
-    tof_source = FixedToFUserXSource(
+        fixed_range_override_m = float(args.tof_user_x_m) - sensor_origin_x_m
+    tof_service = create_tof_service(tof_cfg, fixed_range_override_m)
+    tof_source = ToFUserXSource(
+        sensor_service=tof_service,
         sensor_origin_x_m=sensor_origin_x_m,
-        fixed_range_m=fixed_range_m,
         minimum_user_x_m=float(tof_cfg["minimum_user_x_m"]),
         maximum_user_x_m=float(tof_cfg["maximum_user_x_m"]),
     )
-    initial_user_x_m = tof_source.read_user_x_m()
+    tof_opened = tof_source.open()
+
+    fusion_cfg = settings.get("fusion", {})
+    fusion = UserXFusion(
+        tof_weight=float(fusion_cfg.get("tof_weight", 0.7)),
+        vision_weight=float(fusion_cfg.get("vision_weight", 0.3)),
+    )
+    vision_estimator = EyeGapVisionDistanceEstimator(
+        minimum_eye_gap_px=float(fusion_cfg.get("minimum_eye_gap_px", 5.0)),
+        minimum_distance_m=float(fusion_cfg.get("minimum_vision_distance_m", 0.25)),
+        maximum_distance_m=float(fusion_cfg.get("maximum_vision_distance_m", 1.20)),
+        filter_alpha=float(fusion_cfg.get("vision_filter_alpha", 0.25)),
+    )
     posture_cfg = settings.get("postures", {})
     rest_cfg = posture_cfg.get("rest", {})
     rest_command = JointCommand(
@@ -439,9 +580,16 @@ def run() -> None:
         mode_text = f"MOTOR 1+2 ENABLED / {speed_mode_text} SPEED"
     else:
         current = JointCommand(0.0, 0.0)
-        mode_text = "FIXED TOF SIMULATION"
+        tof_mode = "FIXED TOF" if fixed_range_override_m is not None else str(
+            tof_cfg.get("mode", "hardware")
+        ).upper()
+        mode_text = f"{tof_mode} SIMULATION"
 
     reference_z = planner.set_vertical_reference(current)
+    try:
+        initial_user_x_m = tof_source.read_user_x_m()
+    except ValueError:
+        initial_user_x_m = None
     command_mode_text = (
         "DIRECT IK TARGET"
         if planner.joint_command_mode == "direct"
@@ -450,9 +598,11 @@ def run() -> None:
     mode_text = f"{mode_text} / {command_mode_text}"
     print(f"[{mode_text}] vertical reference={reference_z:.3f}m")
     print(
-        f"고정 ToF 사용자 X={initial_user_x_m:.3f}m, "
-        f"유지 거리={planner.desired_distance_m:.3f}m. "
-        "q=종료, h=휴식, a=자동제어 재개, "
+        f"ToF={'READY' if tof_opened else 'UNAVAILABLE'}, "
+        f"초기 사용자 X={initial_user_x_m if initial_user_x_m is not None else '--'}, "
+        f"유지 거리={planner.desired_distance_m:.3f}m, "
+        f"융합=ToF {fusion.tof_weight:.1f} + Vision {fusion.vision_weight:.1f}. "
+        "q=종료, h=휴식, a=자동제어 재개, r=비전 기준 재측정, "
         "IK 창 닫기=종료"
     )
 
@@ -480,12 +630,13 @@ def run() -> None:
             visualizer.close()
         if motor_process is not None:
             motor_process.close()
+        tof_source.close()
         raise RuntimeError(f"웹캠 index {args.camera}를 열 수 없습니다.")
 
     command_interval = 1.0 / max(float(settings["control"]["command_hz"]), 1.0)
     last_command_at = 0.0
     last_timestamp_ms = -1
-    status = "고정 ToF 입력 기반 제어 시작 대기"
+    status = "ToF + Vision 입력 기반 제어 시작 대기"
     visual_current = current
     visual_target: JointCommand | None = None
     auto_control_enabled = True
@@ -524,11 +675,45 @@ def run() -> None:
                     cv2.circle(frame, eye.right_xy, 5, (0, 255, 255), -1)
                     cv2.line(frame, eye.left_xy, eye.right_xy, (0, 255, 255), 2)
 
+                tof_user_x_m = None
+                vision_user_x_m = None
+                user_x_m = None
+                fusion_mode = "SAFE HOLD"
                 try:
-                    user_x_m = tof_source.read_user_x_m()
+                    tof_user_x_m = tof_source.read_user_x_m()
                 except ValueError as error:
-                    user_x_m = None
                     status = f"SAFE HOLD: {error}"
+                else:
+                    current_pose_for_vision = planner.kinematics.forward(current)
+                    if eye is not None:
+                        try:
+                            if not vision_estimator.calibrated:
+                                vision_estimator.calibrate(
+                                    eye.gap_px,
+                                    tof_user_x_m - current_pose_for_vision.x_m,
+                                )
+                            vision_distance_m = vision_estimator.estimate_distance_m(
+                                eye.gap_px
+                            )
+                            vision_user_x_m = (
+                                current_pose_for_vision.x_m + vision_distance_m
+                            )
+                        except ValueError:
+                            # 눈 랜드마크가 순간적으로 튀어도 신뢰도가 높은 ToF로
+                            # 계속 제어한다. 반대로 ToF가 없으면 비전 단독 구동은 금지한다.
+                            vision_user_x_m = None
+                    try:
+                        user_x_m = tof_source.validate_user_x_m(
+                            fusion.fuse(tof_user_x_m, vision_user_x_m)
+                        )
+                        fusion_mode = (
+                            f"FUSED {fusion.tof_weight:.1f}:{fusion.vision_weight:.1f}"
+                            if vision_user_x_m is not None
+                            else "TOF ONLY"
+                        )
+                    except ValueError as error:
+                        user_x_m = None
+                        status = f"SAFE HOLD: {error}"
 
                 now = time.monotonic()
                 if (
@@ -549,7 +734,7 @@ def run() -> None:
                         if target is None:
                             visual_current = current
                             visual_target = None
-                            status = "ToF 목표 X deadband - 현재 자세 유지"
+                            status = f"{fusion_mode} 목표 X deadband - 현재 자세 유지"
                         else:
                             target_pose = planner.kinematics.forward(target)
                             move_result = None
@@ -589,12 +774,21 @@ def run() -> None:
                         status = f"SAFE HOLD: {error}"
 
                 if user_x_m is None:
-                    tof_text = "tof_user_x=--  user-monitor=--"
+                    distance_text = "tof=--  vision=--  fused=--  user-monitor=--"
                 else:
                     current_pose = planner.kinematics.forward(current)
                     user_monitor_distance_m = user_x_m - current_pose.x_m
-                    tof_text = (
-                        f"tof_user_x={user_x_m * 100:.1f}cm  "
+                    tof_value = (
+                        "--" if tof_user_x_m is None else f"{tof_user_x_m * 100:.1f}"
+                    )
+                    vision_value = (
+                        "--"
+                        if vision_user_x_m is None
+                        else f"{vision_user_x_m * 100:.1f}"
+                    )
+                    distance_text = (
+                        f"tof={tof_value}cm vision={vision_value}cm "
+                        f"fused={user_x_m * 100:.1f}cm  "
                         f"user-monitor={user_monitor_distance_m * 100:.1f}cm"
                     )
                 pose_text = "pose=--" if landmarks is None else "pose=OK"
@@ -609,7 +803,7 @@ def run() -> None:
                 )
                 cv2.putText(
                     frame,
-                    tof_text,
+                    distance_text,
                     (12, 54),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.52,
@@ -644,6 +838,9 @@ def run() -> None:
                 key = cv2.waitKey(1) & 0xFF
                 if key == ord("q"):
                     break
+                if key == ord("r"):
+                    vision_estimator.reset()
+                    status = "비전 눈 간격 기준 초기화 — 다음 유효 프레임에서 ToF로 재보정"
                 if key == ord("h"):
                     if time.monotonic() <= rest_confirmation_deadline:
                         rest_requested = True
@@ -678,7 +875,7 @@ def run() -> None:
                         current = motor_process.read_angles()
                     planner.request_working_pose_recovery()
                     auto_control_enabled = True
-                    status = "자동제어 재개 — 작업자세 복귀 후 ToF X 추종"
+                    status = "자동제어 재개 — 작업자세 복귀 후 센서 융합 X 추종"
     finally:
         capture.release()
         cv2.destroyAllWindows()
@@ -686,6 +883,7 @@ def run() -> None:
             visualizer.close()
         if motor_process is not None:
             motor_process.close()
+        tof_source.close()
 
 
 if __name__ == "__main__":

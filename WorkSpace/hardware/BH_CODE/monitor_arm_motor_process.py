@@ -15,8 +15,12 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from monitor_arm_kinematics import JointCommand
-from monitor_arm_speed import (
+PYQT_DIR = Path(__file__).resolve().parents[2] / "pyQt"
+if str(PYQT_DIR) not in sys.path:
+    sys.path.insert(0, str(PYQT_DIR))
+
+from services.monitor_arm_kinematics import JointCommand
+from services.monitor_arm_speed import (
     ABSOLUTE_SPEED_CAP,
     FIXED_SPEED_MODE,
     select_speed,

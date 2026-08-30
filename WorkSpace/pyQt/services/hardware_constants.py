@@ -10,6 +10,21 @@
 
 
 # ============================================================
+# VL53L0X ToF (HW-843) - Raspberry Pi 5 I2C-3
+# ============================================================
+# /boot/firmware/config.txt:
+#   dtoverlay=i2c3-pi5,pins_22_23
+# BCM22/23 are physical pins 15/16.  The Linux device is /dev/i2c-3.
+TOF_I2C_BUS = 3
+TOF_I2C_ADDRESS = 0x29
+TOF_SAMPLE_HZ = 20.0
+TOF_MIN_RANGE_M = 0.03
+TOF_MAX_RANGE_M = 2.0
+TOF_FILTER_ALPHA = 0.25
+TOF_IO_TIMEOUT_SEC = 0.20
+
+
+# ============================================================
 # ADXL345 IMU - Direct X/Y Control
 # ============================================================
 IMU_BUS = 1

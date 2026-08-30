@@ -4,10 +4,16 @@
 from __future__ import annotations
 
 import math
+import sys
 import tkinter as tk
+from pathlib import Path
 from tkinter import messagebox, ttk
 
-from monitor_arm_kinematics import JointCommand, TwoJointMonitorArm
+PYQT_DIR = Path(__file__).resolve().parents[2] / "pyQt"
+if str(PYQT_DIR) not in sys.path:
+    sys.path.insert(0, str(PYQT_DIR))
+
+from services.monitor_arm_kinematics import JointCommand, TwoJointMonitorArm
 
 
 def calculate_arm_points(
@@ -62,16 +68,16 @@ class PoseIKVisualizer:
         outer.pack(fill="both", expand=True)
 
         self.mode_var = tk.StringVar(value="SIMULATION")
-        self.distance_var = tk.StringVar(value="ToF 사용자 X: 입력 대기")
+        self.distance_var = tk.StringVar(value="융합 사용자 X: 입력 대기")
         self.current_var = tk.StringVar(value="현재 자세: -")
         self.target_var = tk.StringVar(value="IK 목표: -")
-        self.status_var = tk.StringVar(value="ToF/Pose 입력 시작 대기")
+        self.status_var = tk.StringVar(value="ToF/Vision 입력 시작 대기")
 
         heading = ttk.Frame(outer)
         heading.pack(fill="x")
         ttk.Label(
             heading,
-            text="ToF 사용자 X 기반 2축 IK",
+            text="ToF 0.7 + Vision 0.3 사용자 X 기반 2축 IK",
             font=("TkDefaultFont", 14, "bold"),
         ).pack(side="left")
         ttk.Label(heading, textvariable=self.mode_var).pack(side="right")
@@ -189,14 +195,14 @@ class PoseIKVisualizer:
 
         if user_x_m is None:
             self.distance_var.set(
-                f"ToF 사용자 X: 입력 대기 / "
+                f"융합 사용자 X: 입력 대기 / "
                 f"유지 목표 {self.desired_distance_m * 100:.1f}cm"
             )
         else:
             actual_distance_m = float(user_x_m) - current_pose.x_m
             error_cm = (actual_distance_m - self.desired_distance_m) * 100.0
             self.distance_var.set(
-                f"ToF 사용자 X {float(user_x_m) * 100:.1f}cm / "
+                f"융합 사용자 X {float(user_x_m) * 100:.1f}cm / "
                 f"사용자–모니터 {actual_distance_m * 100:.1f}cm / "
                 f"유지 목표 {self.desired_distance_m * 100:.1f}cm / "
                 f"오차 {error_cm:+.1f}cm"

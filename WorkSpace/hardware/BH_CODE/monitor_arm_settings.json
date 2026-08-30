@@ -14,11 +14,26 @@
     "max_monitor_x_step_m": 0.02
   },
   "tof": {
-    "mode": "fixed_stub",
+    "mode": "hardware",
+    "i2c_bus": 3,
+    "i2c_address": 41,
+    "sample_hz": 20.0,
+    "minimum_range_m": 0.03,
+    "maximum_range_m": 2.0,
+    "filter_alpha": 0.25,
+    "io_timeout_sec": 0.2,
     "sensor_origin_x_m": 0.0,
     "fixed_range_m": 0.732848052197525,
     "minimum_user_x_m": 0.6007655,
     "maximum_user_x_m": 0.8307655
+  },
+  "fusion": {
+    "tof_weight": 0.7,
+    "vision_weight": 0.3,
+    "minimum_eye_gap_px": 5.0,
+    "minimum_vision_distance_m": 0.25,
+    "maximum_vision_distance_m": 1.2,
+    "vision_filter_alpha": 0.25
   },
   "control": {
     "command_hz": 5.0,
