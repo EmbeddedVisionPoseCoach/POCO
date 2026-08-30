@@ -210,6 +210,57 @@ class MotorService:
             self.last_error = str(error)
             return False
 
+    def move_joints_special(
+        self,
+        targets,
+        speed,
+        acc=None,
+        wait=False,
+    ):
+        """Motor1/2 Rest/Recovery 특수 SyncWrite를 그대로 전달한다.
+
+        어떤 자세를 Rest로 볼지, Recovery가 안전한지 여부는
+        Motor12Controller가 판단한다.
+
+        이 Service는 목표값과 speed/acc를 판단하거나 변경하지 않는다.
+        """
+        if not self.available or self.arm is None:
+            self.last_error = ("Motor bus unavailable")
+            return False
+
+        special_move = getattr(
+            self.arm,
+            "move_joints_special",
+            None,
+        )
+
+        if not callable(special_move):
+            self.last_error = (
+                "MotorController special move API "
+                "not found"
+            )
+            return False
+
+        try:
+            kwargs = {
+                "targets": {
+                    str(joint_name): float(angle)
+                    for joint_name, angle
+                    in dict(targets).items()
+                },
+                "speed": int(speed),
+                "wait": bool(wait),
+            }
+
+            if acc is not None:
+                kwargs["acc"] = int(acc)
+
+            return bool(special_move(**kwargs))
+
+        except Exception as error:
+            self.last_error = str(error)
+            return False
+
     def move_joint_relative(self, joint_name, delta_angle, speed, wait=False):
         if not self.available or self.arm is None:
             self.last_error = "Motor bus unavailable"

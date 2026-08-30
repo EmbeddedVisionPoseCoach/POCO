@@ -635,6 +635,130 @@ class MotorController:
             expected_generations=expected_generations,
         )
 
+    def move_joints_special(
+        self,
+        targets,
+        speed,
+        acc=DEFAULT_ACC,
+        wait=DEFAULT_WAIT,
+        timeout=DEFAULT_TIMEOUT_SEC,
+    ):
+        """Motor1/2의 검증된 Rest/Recovery 예외 자세를 SyncWrite한다.
+
+        일반 ``move_joints()``와 달리 Calibration Safe Range만 우회한다.
+
+        반드시 유지하는 안전장치:
+        - Emergency Stop / User Stop latch
+        - Motor1/2 이외 Joint 차단
+        - Speed max_speed 검사
+        - Acc 검사
+        - Position Calibration 완료 검사
+        - STS 절대 Position 0~4095 검사
+        - command lock
+        - command generation 갱신
+
+        이 메서드는 일반 팀원 제어용 API가 아니라 Motor12Controller의
+        Rest/Recovery 전용 내부 경로다.
+        """
+        if not self._check_motion_allowed():
+            return False
+
+        if not isinstance(targets, dict):
+            self._print_error("targets는 dict여야 합니다.")
+            return False
+
+        required_joints = {
+            "shoulder_lift",
+            "elbow_flex",
+        }
+
+        # 예외 경로를 다른 Servo에 재사용하지 못하도록
+        # Motor1/2 두 축을 함께 지정한 경우만 허용한다.
+        if set(targets.keys()) != required_joints:
+            self._print_error(
+                "Special Position 예외 이동은 "
+                "shoulder_lift + elbow_flex 두 Joint를 "
+                "동시에 지정해야 합니다."
+            )
+            return False
+
+        sync_commands = {}
+        wait_targets = {}
+
+        try:
+            acc = self.calibration.validate_acc(acc)
+
+            for joint_name, angle in targets.items():
+                joint_speed = (
+                    self.calibration.validate_speed(
+                        joint_name,
+                        speed,
+                    )
+                )
+
+                # Safe Range만 생략하고 STS 절대범위는 검사한다.
+                target_position = (
+                    self.calibration
+                    .command_angle_to_position_absolute_only(
+                        joint_name,
+                        angle,
+                    )
+                )
+
+                servo = self.calibration.get_joint(joint_name)
+                servo_id = int(servo["servo_id"])
+
+                sync_commands[servo_id] = {
+                    "position": target_position,
+                    "speed": joint_speed,
+                    "acc": acc,
+                }
+
+                wait_targets[servo_id] = (target_position)
+
+        except CalibrationError as error:
+            self._print_error(error)
+            return False
+
+        # 기존 move_joints()와 동일하게 실제 Write 직전에
+        # Stop 상태를 다시 확인하고 command lock 안에서 전송한다.
+        with self._command_lock:
+            if not self._check_motion_allowed():
+                return False
+
+            success = (
+                self.driver.sync_write_positions(
+                    sync_commands
+                )
+            )
+
+            if success:
+                expected_generations = (
+                    self._bump_command_generations(
+                        wait_targets.keys()
+                    )
+                )
+            else:
+                expected_generations = None
+
+        if not success:
+            self._print_error(
+                "Motor1/2 Special Position "
+                "SyncWrite 실패"
+            )
+            return False
+
+        if not wait:
+            return True
+
+        return self._wait_for_targets(
+            wait_targets,
+            timeout=timeout,
+            expected_generations=(
+                expected_generations
+            ),
+        )
+
     # ========================================================
     # 4. Zero 이동
     # ========================================================
