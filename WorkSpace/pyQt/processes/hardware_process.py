@@ -267,6 +267,13 @@ def run_hardware_process(
     latest_pose_frame_id = None
     latest_pose_landmarks = None
     latest_pose_landmark_valid = False
+    
+    # 같은 Pose frame을 빠른 Hardware loop에서 반복 처리하면
+    # Vision EMA가 한 프레임에 여러 번 적용될 수 있으므로
+    # 마지막 처리 frame과 Vision 결과를 별도 상태로 유지한다.
+    last_vision_pose_frame_id = None
+    latest_vision_user_x_m = None
+    latest_eye_gap_px = None
 
     # ========================================================
     # 3. Calibration / Runtime 상태
