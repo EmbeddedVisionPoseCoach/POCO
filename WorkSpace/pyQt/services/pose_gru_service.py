@@ -69,7 +69,9 @@ class PoseGruService:
         except ImportError:
             import tensorflow.lite as tflite
 
-        return tflite.Interpreter(model_path=str(self.model_path))
+        return tflite.Interpreter(
+            model_path=str(self.model_path)
+        )
 
     def load(self):
         if not self.model_path.exists():

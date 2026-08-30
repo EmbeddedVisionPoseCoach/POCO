@@ -214,7 +214,7 @@ class VisionProcessManager:
             f"[VisionProcessManager] Mode={self.profile_mode} "
             f"Pose={'ON' if self.enable_pose else 'OFF'} "
             f"Face={'ON' if self.enable_face else 'OFF'} "
-            f"Hardware=IR_IMU_MOTOR3 RingSlots={self.slot_count}"
+            f"Hardware=IMU_MOTOR1_4 RingSlots={self.slot_count}"
         )
 
     # --------------------------------------------------------

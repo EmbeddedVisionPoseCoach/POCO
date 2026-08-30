@@ -2,8 +2,6 @@ import time
 
 from ipc.queue_utils import drain_ordered, get_latest, put_latest, put_ordered
 from services.hardware_config_service import HardwareConfigService
-from services.hardware_constants import IR_CHECK_TIMEOUT_SEC
-from services.ir_service import IRSensorService
 from services.imu_service import ADXL345IMUService
 from services.motor_service import MotorService
 from services.motor12_controller import Motor12Controller
@@ -14,7 +12,6 @@ HARDWARE_STATUS_INTERVAL_SEC = 0.05
 HARDWARE_LOOP_SLEEP_SEC = 0.002
 
 HW_IDLE = "IDLE"
-HW_IR_CHECK = "IR_CHECK"
 HW_IMU_OFFSET_CALIBRATING = "IMU_OFFSET_CALIBRATING"
 HW_READY_FOR_POSE_CALIBRATION = "READY_FOR_POSE_CALIBRATION"
 HW_POSE_CALIBRATING = "POSE_CALIBRATING"
@@ -71,15 +68,15 @@ def run_hardware_process(
 
     핵심 원칙
     ---------
-    1. 실제 GPIO/I2C/Serial은 이 Process만 소유한다.
+    1. 실제 I2C/Serial은 이 Process만 소유한다.
     2. MotorController/Serial 포트는 MotorService 하나만 생성한다.
     3. Motor1 -> Motor2 -> Motor3 -> Motor4 순서로 Controller update를 호출한다.
     4. 1/2번 로직은 motor12_controller.py만 수정하면 된다.
-    5. 3/4번 로직은 motor34_controller.py에 있으며 Motor3=Roll(좌우), Motor4=Pitch(상하)로 제어한다.
-    6. 센서가 추가돼도 Queue를 새로 만들지 않고 HARDWARE_STATE dict에 추가한다.
+    5. 3/4번 로직은 motor34_controller.py에 있으며 Motor3=IMU Y, Motor4=IMU X Direct PID로 제어한다.
+    6. 추가 센서/상태도 Queue를 새로 만들지 않고 HARDWARE_STATE dict에 추가한다.
     """
     print(
-        f"[HardwareProcess] 시작 - IR + IMU + MOTOR1~4 "
+        f"[HardwareProcess] 시작 - IMU + MOTOR1~4 "
         f"Pose={'ON' if enable_pose else 'OFF'} "
         f"Face={'ON' if enable_face else 'OFF'}"
     )
@@ -92,7 +89,6 @@ def run_hardware_process(
     control = config_data["control"]
 
     # 생성자는 JSON이 아니라 코드 상수 기본값으로 초기화된다.
-    ir = IRSensorService()
     imu = ADXL345IMUService()
     motor_service = MotorService()
 
@@ -104,7 +100,6 @@ def run_hardware_process(
     imu.apply_control_config(control["imu"], control["pid"])
     motor34.apply_control_config(control["motor"])
 
-    ir_opened = ir.open()
     imu_opened = imu.open()
     motor_bus_opened = motor_service.open()
     motor34_opened = bool(
@@ -113,7 +108,6 @@ def run_hardware_process(
         and motor34.initialize()
     )
 
-    latest_ir_state = dict(ir.latest_state)
     latest_imu_state = dict(imu.latest_state)
     latest_motor12_state = dict(motor12.latest_state)
     latest_motor34_state = dict(motor34.latest_state)
@@ -132,12 +126,9 @@ def run_hardware_process(
     # 3. Calibration / Runtime 상태
     # ========================================================
     workflow_state = HW_IDLE
-    prepare_started_at = None
     calibration_generation = 0
     calibration_ready_emitted = False
-    ir_loss_notified_mode = None
 
-    last_ir_sample_time = 0.0
     last_imu_sample_time = 0.0
     last_status_time = 0.0
 
@@ -148,7 +139,6 @@ def run_hardware_process(
         config_data = new_config
         control = config_data["control"]
 
-        # IR pin/bus/sample Hz는 JSON에서 바꾸지 않는다.
         imu_ok = imu.apply_control_config(control["imu"], control["pid"])
         if imu_ok and not imu.available:
             imu_ok = imu.open()
@@ -166,13 +156,11 @@ def run_hardware_process(
         else:
             motor34_opened = False
 
-        return bool(ir_opened and imu_opened and motor34_opened)
+        return bool(imu_opened and motor34_opened)
 
     def build_ready_event():
-        all_ready = bool(ir_opened and imu_opened and motor34_opened and motor34.ready)
+        all_ready = bool(imu_opened and motor34_opened and motor34.ready)
         errors = []
-        if not ir_opened:
-            errors.append(f"IR 실패: {ir.last_error}")
         if not imu_opened:
             errors.append(f"IMU 실패: {imu.last_error}")
         if not motor_bus_opened:
@@ -188,11 +176,10 @@ def run_hardware_process(
             "type": "HARDWARE_READY",
             "ready": True,
             "content_ready": all_ready,
-            "ir_ready": bool(ir_opened),
             "imu_ready": bool(imu_opened),
             "motor_ready": bool(motor34_opened and motor34.ready),
             "message": (
-                "Hardware Process IR/IMU/Motor3/4 준비 완료"
+                "Hardware Process IMU/Motor3/4 준비 완료"
                 if all_ready
                 else "Hardware 일부 준비 실패 / " + " / ".join(errors)
             ),
@@ -238,14 +225,11 @@ def run_hardware_process(
                 if event_type == "PREPARE_CALIBRATION":
                     calibration_generation += 1
                     calibration_ready_emitted = False
-                    ir_loss_notified_mode = None
 
                     if imu.calibrating:
                         imu.cancel_calibration()
 
                     missing = []
-                    if not ir_opened:
-                        missing.append("IR")
                     if not imu_opened:
                         missing.append("IMU")
                     if not motor34_opened or not motor34.ready:
@@ -263,26 +247,36 @@ def run_hardware_process(
                         )
                         continue
 
-                    ir.reset_stability()
-                    latest_ir_state = ir.update()
-                    workflow_state = HW_IR_CHECK
-                    prepare_started_at = time.monotonic()
-                    _put_hardware_event(
-                        hw_to_main_event_queue,
-                        "HARDWARE_CALIBRATION_PRECHECK_STARTED",
-                        success=True,
-                        message="IR 사용자 감지를 확인합니다.",
-                        generation=calibration_generation,
-                        workflow_state=workflow_state,
-                    )
-                    print("[HardwareProcess] Calibration 준비: IR 확인 시작")
+                    success = imu.start_calibration()
+                    latest_imu_state = dict(imu.latest_state)
+
+                    if success:
+                        workflow_state = HW_IMU_OFFSET_CALIBRATING
+                        _put_hardware_event(
+                            hw_to_main_event_queue,
+                            "IMU_OFFSET_CALIBRATION_STARTED",
+                            success=True,
+                            message=f"IMU X/Y 기준값 측정 시작 ({imu.calibration_sec:.1f}초)",
+                            generation=calibration_generation,
+                            workflow_state=workflow_state,
+                        )
+                        print("[HardwareProcess] IMU X/Y 기준값 Calibration 시작")
+                    else:
+                        workflow_state = HW_IDLE
+                        _put_hardware_event(
+                            hw_to_main_event_queue,
+                            "HARDWARE_CALIBRATION_READY",
+                            success=False,
+                            message="IMU X/Y 기준값 Calibration을 시작하지 못했습니다.",
+                            generation=calibration_generation,
+                            workflow_state=workflow_state,
+                        )
                     continue
 
                 if event_type == "CANCEL_CALIBRATION_PREPARE":
                     if imu.calibrating:
                         imu.cancel_calibration()
                     workflow_state = HW_IDLE
-                    prepare_started_at = None
                     calibration_ready_emitted = False
                     continue
 
@@ -291,7 +285,7 @@ def run_hardware_process(
                         hw_to_main_event_queue,
                         "IMU_CALIBRATION_REJECTED",
                         success=False,
-                        message="PREPARE_CALIBRATION(IR 확인 포함) 경로를 사용해주세요.",
+                        message="PREPARE_CALIBRATION 경로를 사용해주세요.",
                     )
                     continue
 
@@ -422,9 +416,6 @@ def run_hardware_process(
             # ==================================================
             now = time.monotonic()
 
-            if now - last_ir_sample_time >= ir.sample_interval:
-                last_ir_sample_time = now
-                latest_ir_state = ir.update()
 
             if now - last_imu_sample_time >= imu.sample_interval:
                 last_imu_sample_time = now
@@ -434,15 +425,17 @@ def run_hardware_process(
                 if calibration_result is not None:
                     try:
                         config_data = config_service.update_imu_calibration(
-                            calibration_result["pitch_offset_deg"],
-                            calibration_result["roll_offset_deg"],
+                            calibration_result["x_reference_g"],
+                            calibration_result["y_reference_g"],
                             calibration_result["sample_count"],
+                            x_reference_raw=calibration_result.get("x_reference_raw", 0.0),
+                            y_reference_raw=calibration_result.get("y_reference_raw", 0.0),
                         )
                         _put_hardware_event(
                             hw_to_main_event_queue,
                             "IMU_OFFSET_SAVED",
                             success=True,
-                            message="IMU Offset을 hardware_control.json에 기록했습니다.",
+                            message="IMU X/Y 기준값을 hardware_control.json에 기록했습니다.",
                             calibration=config_data["calibration"]["imu"],
                             config=config_data,
                         )
@@ -455,75 +448,11 @@ def run_hardware_process(
                         )
 
             # ==================================================
-            # D. Calibration State Machine: IR -> IMU Offset
+            # D. Calibration State Machine: IMU X/Y Reference
             # ==================================================
-            if workflow_state == HW_IR_CHECK:
-                if latest_ir_state.get("stable_detected", False):
-                    success = imu.start_calibration()
-                    latest_imu_state = dict(imu.latest_state)
-                    if success:
-                        workflow_state = HW_IMU_OFFSET_CALIBRATING
-                        _put_hardware_event(
-                            hw_to_main_event_queue,
-                            "IR_CHECK_PASSED",
-                            success=True,
-                            message="IR 사용자 감지 확인 완료. IMU Offset 측정을 시작합니다.",
-                            generation=calibration_generation,
-                        )
-                        _put_hardware_event(
-                            hw_to_main_event_queue,
-                            "IMU_OFFSET_CALIBRATION_STARTED",
-                            success=True,
-                            message=f"IMU Offset 측정 시작 ({imu.calibration_sec:.1f}초)",
-                            generation=calibration_generation,
-                        )
-                        print("[HardwareProcess] IR 확인 완료 -> IMU Offset 시작")
-                    else:
-                        workflow_state = HW_IDLE
-                        _put_hardware_event(
-                            hw_to_main_event_queue,
-                            "HARDWARE_CALIBRATION_READY",
-                            success=False,
-                            message="IMU Offset Calibration을 시작하지 못했습니다.",
-                            generation=calibration_generation,
-                            workflow_state=workflow_state,
-                        )
-
-                elif (
-                    prepare_started_at is not None
-                    and now - prepare_started_at >= IR_CHECK_TIMEOUT_SEC
-                ):
-                    workflow_state = HW_IDLE
-                    _put_hardware_event(
-                        hw_to_main_event_queue,
-                        "HARDWARE_CALIBRATION_READY",
-                        success=False,
-                        message=(
-                            f"IR 센서에서 사용자를 {IR_CHECK_TIMEOUT_SEC:.1f}초 안에 "
-                            "안정적으로 감지하지 못했습니다."
-                        ),
-                        generation=calibration_generation,
-                        workflow_state=workflow_state,
-                    )
-                    print("[HardwareProcess] IR 확인 실패 -> Calibration 차단")
-
-            elif workflow_state == HW_IMU_OFFSET_CALIBRATING:
-                if latest_ir_state.get("lost_duration_sec", 0.0) >= ir.lost_grace_sec:
-                    imu.cancel_calibration()
-                    latest_imu_state = dict(imu.latest_state)
-                    workflow_state = HW_IDLE
-                    _put_hardware_event(
-                        hw_to_main_event_queue,
-                        "HARDWARE_CALIBRATION_READY",
-                        success=False,
-                        message="IMU Offset 측정 중 IR 감지가 끊겨 Calibration을 취소했습니다.",
-                        generation=calibration_generation,
-                        workflow_state=workflow_state,
-                    )
-                    print("[HardwareProcess] IMU Offset 중 IR LOST -> Calibration 취소")
-
+            if workflow_state == HW_IMU_OFFSET_CALIBRATING:
                 # 실제 IMU Service 세션 상태를 기준으로 READY를 판정한다.
-                elif imu.calibrated and not imu.calibrating and not calibration_ready_emitted:
+                if imu.calibrated and not imu.calibrating and not calibration_ready_emitted:
                     calibration_ready_emitted = True
                     workflow_state = HW_READY_FOR_POSE_CALIBRATION
                     latest_imu_state = dict(imu.latest_state)
@@ -532,15 +461,18 @@ def run_hardware_process(
                         "HARDWARE_CALIBRATION_READY",
                         success=True,
                         message=(
-                            "IR 확인 및 IMU Offset 완료. "
+                            "IMU X/Y 기준값 Calibration 완료. "
                             "Pose Calibration + Motor3/4 짐벌 제어를 시작할 수 있습니다."
                         ),
                         generation=calibration_generation,
                         workflow_state=workflow_state,
+                        imu_x_reference_g=latest_imu_state.get("imu_x_reference_g"),
+                        imu_y_reference_g=latest_imu_state.get("imu_y_reference_g"),
+                        # 기존 UI 호환 진단값
                         pitch_offset_deg=latest_imu_state.get("pitch_offset_deg"),
                         roll_offset_deg=latest_imu_state.get("roll_offset_deg"),
                     )
-                    print("[HardwareProcess] IMU Offset 완료 -> Pose Calibration READY")
+                    print("[HardwareProcess] IMU X/Y Calibration 완료 -> Pose Calibration READY")
 
             # ==================================================
             # E. Main mode -> Hardware workflow
@@ -561,46 +493,21 @@ def run_hardware_process(
             imu_ready = bool(
                 imu.available and imu.calibrated and not imu.calibrating
             )
-            ir_gate = bool(
-                latest_ir_state.get("available", False)
-                and latest_ir_state.get("detected", False)
-                and latest_ir_state.get("lost_duration_sec", 0.0) < ir.lost_grace_sec
-            )
             motor34_requested = main_mode in ("CALIBRATING", "MEASURING")
             motor34_active = bool(
                 motor34_requested
                 and imu_ready
-                and ir_gate
                 and motor34.ready
             )
-
-            if motor34_requested and not ir_gate:
-                if ir_loss_notified_mode != main_mode:
-                    ir_loss_notified_mode = main_mode
-                    _put_hardware_event(
-                        hw_to_main_event_queue,
-                        (
-                            "IR_LOST_DURING_CALIBRATION"
-                            if main_mode == "CALIBRATING"
-                            else "IR_LOST_DURING_MEASUREMENT"
-                        ),
-                        success=False,
-                        message="IR 사용자 감지가 끊겨 Motor3/4 짐벌 제어를 중지했습니다.",
-                        workflow_state=workflow_state,
-                    )
-            else:
-                ir_loss_notified_mode = None
 
             context = {
                 "now": now,
                 "main_mode": main_mode,
                 "workflow_state": workflow_state,
-                "ir": latest_ir_state,
                 "imu": latest_imu_state,
                 "pose": latest_pose_state,
                 "face": latest_face_state,
                 "motor34_control_active": motor34_active,
-                "pid_limit_deg_s": imu.output_limit_deg_s,
             }
 
             # 실행 순서가 코드에 그대로 보이도록 유지한다.
@@ -628,7 +535,7 @@ def run_hardware_process(
                 state = {
                     "type": "HARDWARE_STATE",
                     "ready": True,
-                    "content_ready": bool(ir_opened and imu_opened and motor34.ready),
+                    "content_ready": bool(imu_opened and motor34.ready),
                     "timestamp": time.time(),
                     "workflow_state": workflow_state,
                     "main_mode": main_mode,
@@ -644,16 +551,14 @@ def run_hardware_process(
                     ),
                     "face_enabled": bool(enable_face),
                     "face_state_received": latest_face_state is not None if enable_face else False,
-                    "ir": dict(latest_ir_state),
                     "imu": dict(latest_imu_state),
                     "motor": latest_motor_state,
                     "gimbal": {
                         "requested": motor34_requested,
                         "active": motor34_active,
-                        "ir_gate": ir_gate,
                         "imu_ready": imu_ready,
-                        "motor3_axis": "roll",
-                        "motor4_axis": "pitch",
+                        "motor3_axis": "imu_y",
+                        "motor4_axis": "imu_x",
                         "motor3_packet_suppressed_at_zero": True,
                         "motor4_packet_suppressed_at_zero": True,
                     },
@@ -671,7 +576,6 @@ def run_hardware_process(
         motor34.close()
         motor_service.close()
         imu.close()
-        ir.close()
 
         put_ordered(
             hw_to_main_event_queue,

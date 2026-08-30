@@ -151,17 +151,29 @@ class MotorService:
             self.last_error = str(error)
             return None
 
-    def move_joint(self, joint_name, angle, speed, wait=False):
+    def move_joint(self, joint_name, angle, speed, acc=None, wait=False):
+        """절대각도 이동.
+
+        acc=None이면 기존 MotorController 기본 Acc를 그대로 사용한다.
+        Motor3/4 Direct IMU 제어는 검증값 Acc=12를 명시해서 호출한다.
+        기존 Motor1/2 호출은 acc를 넘기지 않아도 그대로 동작한다.
+        """
         if not self.available or self.arm is None:
             self.last_error = "Motor bus unavailable"
             return False
         try:
+            kwargs = {
+                "angle": float(angle),
+                "speed": int(speed),
+                "wait": bool(wait),
+            }
+            if acc is not None:
+                kwargs["acc"] = int(acc)
+
             return bool(
                 self.arm.move_joint(
                     joint_name,
-                    angle=float(angle),
-                    speed=int(speed),
-                    wait=bool(wait),
+                    **kwargs,
                 )
             )
         except Exception as error:

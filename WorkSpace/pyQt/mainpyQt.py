@@ -65,8 +65,8 @@ class MainWindow(QMainWindow):
         )
 
         # Hardware 제어 설정(JSON)과 Runtime Sensor State는 성격이 다르므로 분리한다.
-        # - ConfigService: PID/LPF/Deadband/IR 설정 + 마지막 IMU Offset 기록
-        # - StateStore: IR/IMU/Motor의 실시간 최신값(메모리 only)
+        # - ConfigService: PID/LPF/Deadband 설정 + 마지막 IMU X/Y 기준값 기록
+        # - StateStore: IMU/Motor의 실시간 최신값(메모리 only)
         self.hardware_config_service = HardwareConfigService()
         self.hardware_state_store = get_hardware_runtime_state_store()
         self.latest_hardware_config = self.hardware_config_service.load()
@@ -227,7 +227,7 @@ class MainWindow(QMainWindow):
         self.latest_face_state = state
 
     def on_hardware_changed(self, state):
-        """Hardware Process -> Main 최신 State. IR/IMU/Motor 공용 저장소도 갱신한다."""
+        """Hardware Process -> Main 최신 State. IMU/Motor 공용 저장소도 갱신한다."""
         if self._camera_shutdown_in_progress or self._app_closing:
             return
         self.latest_hardware_state = state
@@ -268,13 +268,6 @@ class MainWindow(QMainWindow):
     # ---------------------------------------------------------
     def get_latest_hardware_state(self):
         return self.hardware_state_store.get_hardware_state()
-
-    def get_latest_ir_state(self):
-        """UI/알림/리포트 등 Main Process 어디서든 최신 IR 상태를 조회한다."""
-        return self.hardware_state_store.get_ir_state()
-
-    def is_ir_detected(self, require_stable=False):
-        return self.hardware_state_store.is_ir_detected(require_stable=require_stable)
 
     def get_latest_imu_state(self):
         return self.hardware_state_store.get_imu_state()

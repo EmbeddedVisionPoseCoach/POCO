@@ -30,10 +30,10 @@ DEFAULT_CONFIG_PATH = WORKSPACE_DIR / "data" / "settings" / "hardware_control.js
 
 
 # ============================================================
-# Version 5 = Direct IMU X/Y -> Motor3/4 / V1.9 parity
+# Version 4 = Direct IMU X/Y -> Motor3/4
 # ============================================================
 DEFAULT_HARDWARE_CONFIG = {
-    "version": 5,
+    "version": 4,
     "calibration": {
         "imu": {
             # 기록용. 새 Process 시작 시 자동 활성화하지 않는다.
@@ -96,20 +96,13 @@ def _clamp(value, minimum, maximum):
 
 
 def _normalize_loaded(data):
-    """저장된 config를 V1.9 parity v5 구조로 마이그레이션한다.
+    """예전 Pitch/Roll config를 Direct X/Y v4 구조로 안전하게 마이그레이션.
 
-    v5에서 중요한 점
-    -------------
-    POCO MotorController는 TEAM angle -> URDF 변환에서 -1을 한 번 더 적용한다.
-    따라서 standalone tuner의 실제 raw 방향과 맞추기 위해 Motor3/4 control sign을
-    +1/+1로 바꿨다. 또한 예전 v4 JSON에 남아 있던 alpha=0.20, sign=-1 등
-    stale tuning이 새 코드 기본값을 다시 덮어쓰지 못하도록 v5 미만 config의
-    control block은 검증된 V1.9 기본값으로 1회 초기화한다.
-
-    보존 항목
-    --------
-    - calibration 기록
-    - Motor3/4 enabled 상태
+    중요
+    ----
+    예전 Pitch/Roll PID gain은 입력 단위가 rad/deg 계열이고,
+    새 Direct IMU PID는 입력 단위가 g이므로 숫자를 그대로 옮기지 않는다.
+    v4 이전 파일은 검증된 V1.9 기본 gain/sign/rate로 시작한다.
     """
     if not isinstance(data, dict):
         return {}
@@ -117,20 +110,19 @@ def _normalize_loaded(data):
     data = copy.deepcopy(data)
     version = int(data.get("version", 0) or 0)
 
-    if version >= 5:
+    if version >= 4:
         return data
 
     migrated = copy.deepcopy(DEFAULT_HARDWARE_CONFIG)
 
-    # Calibration 기록은 보존한다. 세션 시작 시 실제 Calibration 절차는 별도다.
-    old_calibration = data.get("calibration", {})
-    if isinstance(old_calibration, dict):
-        old_imu_cal = old_calibration.get("imu")
-        if isinstance(old_imu_cal, dict):
-            migrated["calibration"]["imu"].update(copy.deepcopy(old_imu_cal))
-
-    # 사용자가 Motor3/4 자체를 꺼둔 상태만 보존한다.
+    # 기존 LPF alpha는 같은 의미라 유지할 수 있다.
     old_control = data.get("control", {})
+    old_imu = old_control.get("imu", {}) if isinstance(old_control, dict) else {}
+    if isinstance(old_imu, dict) and "lpf_alpha" in old_imu:
+        migrated["control"]["imu"]["lpf_alpha"] = old_imu["lpf_alpha"]
+
+    # Motor enabled 상태만 보존한다.
+    # direction sign은 제어 의미가 바뀌었으므로 Direct IMU 검증값(-1/-1) 사용.
     old_motor = old_control.get("motor", {}) if isinstance(old_control, dict) else {}
     if isinstance(old_motor, dict):
         for motor_key in ("motor3", "motor4"):
@@ -140,9 +132,8 @@ def _normalize_loaded(data):
                     old_axis["enabled"]
                 )
 
-    # 그 외 control 값은 모두 현재 V1.9 parity 기본값 사용:
-    # alpha=.08 / deadband=.010g / Kp=120 / limit=24deg/s /
-    # command=100Hz / speed=500 / acc=12 / POCO sign=+1,+1
+    # Calibration은 입력 의미가 바뀌었으므로 이전 Pitch/Roll offset을
+    # Direct X/Y reference로 재사용하지 않는다.
     return migrated
 
 
@@ -272,7 +263,7 @@ class HardwareConfigService:
         if not isinstance(data, dict):
             raise ValueError("Hardware config root는 object여야 합니다.")
 
-        data["version"] = 5
+        data["version"] = 4
 
         calibration = data.setdefault("calibration", {}).setdefault("imu", {})
         calibration["x_reference_g"] = float(calibration.get("x_reference_g", 0.0))
@@ -288,6 +279,8 @@ class HardwareConfigService:
             calibration.pop(old_key, None)
 
         control = data.setdefault("control", {})
+        control.pop("ir", None)
+
         imu = control.setdefault("imu", {})
         imu["lpf_alpha"] = _clamp(
             imu.get("lpf_alpha", IMU_LPF_ALPHA),

@@ -8,6 +8,16 @@
 - Motor3/4 짐벌 제어는 IMU X/Y Direct PID V1.9 기준을 사용한다.
 """
 
+# ============================================================
+# IR Sensor
+# ============================================================
+IR_PIN = 17
+IR_ACTIVE_LOW = True
+IR_SAMPLE_HZ = 20.0
+IR_STABLE_DETECT_SEC = 0.5
+IR_LOST_GRACE_SEC = 0.3
+IR_CHECK_TIMEOUT_SEC = 5.0
+
 
 # ============================================================
 # ADXL345 IMU - Direct X/Y Control
@@ -53,17 +63,11 @@ MOTOR34_COMMAND_HZ = 100.0
 MOTOR34_AUTO_SPEED = 500
 MOTOR34_AUTO_ACC = 12
 
-# Direct IMU V1.9의 실기 동작과 POCO MotorService의 팀원용 각도 좌표계를 맞춘 값.
-#
-# 중요:
-# - standalone tuner는 Calibration direction만 사용해 angle -> raw 변환한다.
-# - POCO MotorController는 그 전에 COMMAND_TO_URDF_DIRECTION=-1을 한 번 더 적용한다.
-# - 따라서 tuner의 sign=-1/-1과 같은 실제 raw 방향을 만들려면
-#   POCO Motor34Controller의 TEAM-angle 적분 sign은 +1/+1이어야 한다.
-#
-# PIDController 자체의 error = -imu_error_g 식은 tuner와 동일하게 유지한다.
-MOTOR3_IMU_Y_DIRECTION_SIGN = +1.0
-MOTOR4_IMU_X_DIRECTION_SIGN = +1.0
+# 검증된 Direct IMU 방향 기본값.
+# PIDController 자체에서 error = -imu_error_g 를 사용하고,
+# 아래 sign은 실제 Servo target 증가/감소 방향을 결정한다.
+MOTOR3_IMU_Y_DIRECTION_SIGN = -1.0
+MOTOR4_IMU_X_DIRECTION_SIGN = -1.0
 
 
 # ============================================================
