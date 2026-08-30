@@ -63,8 +63,22 @@ class Motor12Controller:
         self.pose_min_speed = None
         self.pose_full_speed_error_deg = None
 
+        # Motor12 Controller 자체 update는 20Hz로 수행하지만,
+        # 실제 Servo1/2 명령은 monitor_arm_settings.json의 command_hz로 제한한다.
+        self.command_hz = 5.0
+
         if settings is not None:
             control = settings.get("control", {})
+
+            self.command_hz = max(
+                1.0,
+                float(
+                    control.get(
+                        "command_hz",
+                        self.command_hz,
+                    )
+                ),
+            )
 
             self.pose_max_speed = int(
                 control.get(
@@ -114,7 +128,19 @@ class Motor12Controller:
 
             if not 0 <= self.pose_acc <= 30:
                 raise ValueError("Motor1/2 pose_acc 허용범위는 0~30입니다.")
-            
+
+        self.command_interval = 1.0 / self.command_hz
+        self.last_command_time = 0.0
+
+        # 자동추종 진단 상태.
+        # HARDWARE_STATE에서 마지막 목표와 실제 명령 결과를 확인할 수 있도록 유지한다.
+        self.last_target = None
+        self.last_command_speed = 0
+        self.last_largest_delta_deg = 0.0
+        self.last_success = None
+        self.last_user_x_m = None
+        self.hold_reason = "IDLE"
+    
         self.update_hz = max(1.0, float(update_hz))
         self.update_interval = 1.0 / self.update_hz
         self.last_update_time = 0.0
@@ -148,6 +174,7 @@ class Motor12Controller:
         self.available = False
         self.last_error = None
         self._reset_ready_state()
+        self._reset_tracking_runtime(reset_reference=True)
 
         if not self.motor.available:
             self.last_error = "MotorService가 준비되지 않았습니다."
@@ -183,9 +210,7 @@ class Motor12Controller:
             self._reset_ready_state()
             self.latest_state = self._build_state(False)
 
-            print(
-                f"[MOTOR12] 초기화/안전검사 실패: {error}"
-            )
+            print(f"[MOTOR12] 초기화/안전검사 실패: {error}")
 
             return False
 
@@ -198,9 +223,7 @@ class Motor12Controller:
                 "Calibration 정보가 없습니다."
             )
 
-        actual_servo_id = int(
-            servo.get("servo_id", -1)
-        )
+        actual_servo_id = int(servo.get("servo_id", -1))
 
         if actual_servo_id != axis.servo_id:
             raise RuntimeError(
@@ -209,9 +232,7 @@ class Motor12Controller:
                 f"actual={actual_servo_id}"
             )
 
-        max_speed = self.motor.get_max_speed(
-            axis.joint
-        )
+        max_speed = self.motor.get_max_speed(axis.joint)
 
         if max_speed is None or max_speed <= 0:
             raise RuntimeError(
@@ -219,9 +240,7 @@ class Motor12Controller:
                 "max_speed가 설정되지 않았습니다."
             )
 
-        safe_range = self.motor.get_safe_angle_range(
-            axis.joint
-        )
+        safe_range = self.motor.get_safe_angle_range(axis.joint)
 
         if safe_range is None:
             raise RuntimeError(
@@ -239,9 +258,7 @@ class Motor12Controller:
                 f"{safe_min_deg}~{safe_max_deg}"
             )
 
-        ping_result = self.motor.ping_joint(
-            axis.joint
-        )
+        ping_result = self.motor.ping_joint(axis.joint)
 
         if not ping_result.get("success", False):
             raise RuntimeError(
@@ -266,17 +283,38 @@ class Motor12Controller:
 
     def set_enabled(self, enabled):
         self.enabled = bool(enabled)
+
+        if not self.enabled:
+            self._reset_tracking_runtime(reset_reference=True)
+
         self.latest_state = self._build_state(False)
         return self.enabled
 
     def close(self):
         self.available = False
         self._reset_ready_state()
+        self._reset_tracking_runtime(reset_reference=True)
         self.latest_state = self._build_state(False)
 
     def _reset_ready_state(self):
         self.motor1.reset_ready()
         self.motor2.reset_ready()
+
+    def _reset_tracking_runtime(self, reset_reference=False):
+        """일반 자동추종의 Runtime 상태를 초기화한다."""
+        self.last_command_time = 0.0
+        self.last_target = None
+        self.last_command_speed = 0
+        self.last_largest_delta_deg = 0.0
+        self.last_success = None
+        self.last_user_x_m = None
+        self.hold_reason = "IDLE"
+
+        # Motor 제어를 다시 시작할 때는 현재 실제 자세의 Z를
+        # 새 기준으로 잡도록 기존 Planner reference를 제거한다.
+        if reset_reference and self.planner is not None:
+            self.planner.reference_z_m = None
+            self.planner.recovery_active = False
 
     def _calibration_ranges(self):
         """Motor1/2의 현재 Calibration 안전각 범위를 반환한다."""
@@ -322,16 +360,48 @@ class Motor12Controller:
         유지하고, HardwareProcess에는 계산된 현재 상태만 전달한다.
         """
         if self.planner is None:
-            raise RuntimeError(
-                "MonitorArmPlanner가 준비되지 않았습니다."
-            )
+            raise RuntimeError("MonitorArmPlanner가 준비되지 않았습니다.")
 
         current = self._read_current_angles()
-        monitor_pose = self.planner.kinematics.forward(
-            current
-        )
+        monitor_pose = self.planner.kinematics.forward(current)
 
         return current, monitor_pose
+
+    def _normal_tracking_block_reason(self, current):
+        """일반 추종으로 움직이면 안 되는 현재 자세인지 검사한다.
+
+        Rest/Recovery처럼 Calibration 또는 정상 작업 Z 범위를 벗어난
+        자세는 일반 move_joints() 경로에서 처리하지 않는다.
+        """
+        if self.planner is None:
+            return "PLANNER_NOT_READY"
+
+        calibration_ranges = self._calibration_ranges()
+
+        current_angles = {
+            MOTOR1_JOINT: float(current.shoulder_lift_deg),
+            MOTOR2_JOINT: float(current.elbow_flex_deg),
+        }
+
+        for joint, angle in current_angles.items():
+            minimum, maximum = calibration_ranges[joint]
+
+            if not minimum <= angle <= maximum:
+                return "RECOVERY_REQUIRED"
+
+        current_pose = self.planner.kinematics.forward(current)
+
+        if not (
+            self.planner.working_z_min_m
+            <= current_pose.z_m
+            <= self.planner.working_z_max_m
+        ):
+            return "RECOVERY_REQUIRED"
+
+        if self.planner.recovery_active:
+            return "RECOVERY_REQUIRED"
+
+        return None
 
     def _select_tracking_speed(self, current, target):
         """두 Joint 중 더 큰 목표각 오차를 기준으로 공통 Speed를 결정한다."""
@@ -403,15 +473,22 @@ class Motor12Controller:
         }
 
     def update(self, context):
-        """현재 단계에서는 상태 갱신만 수행한다.
+        """융합 user X를 이용해 Motor1/2 일반 자동추종을 수행한다.
 
-        일반 추종 목표의 속도 계산/SyncWrite 내부 경로는 준비되어 있지만,
-        ToF/융합 user_x와 Planner 자동 호출은 이후 단계에서 연결한다.
+        Controller 상태 계산은 20Hz로 수행하지만 실제 Servo 명령은
+        control.command_hz 설정에 따라 제한한다.
+
+        ToF/Fusion 입력이 유효하지 않으면 SAFE_HOLD하고,
+        Rest/Recovery가 필요한 자세는 일반 추종 경로에서 움직이지 않는다.
         """
         now = float(
-            context.get("now", time.monotonic())
+            context.get(
+                "now",
+                time.monotonic(),
+            )
         )
 
+        # Motor12 상태 계산 자체는 20Hz.
         if (
             now - self.last_update_time
             < self.update_interval
@@ -420,16 +497,165 @@ class Motor12Controller:
 
         self.last_update_time = now
 
-        self.latest_state = self._build_state(False)
+        motor12_context = context.get("motor12", {}, )
 
-        return self.latest_state
+        if not isinstance(
+            motor12_context,
+            dict,
+        ):
+            motor12_context = {}
+
+        input_state = motor12_context.get("input", {}, )
+
+        if not isinstance(
+            input_state,
+            dict,
+        ):
+            input_state = {}
+
+        control_requested = bool(
+            motor12_context.get(
+                "control_active",
+                False,
+            )
+        )
+
+        input_valid = bool(
+            input_state.get(
+                "valid",
+                False,
+            )
+        )
+
+        user_x_m = input_state.get("user_x_m")
+
+        can_control = bool(
+            self.available
+            and self.enabled
+            and control_requested
+            and input_valid
+            and user_x_m is not None
+            and self.motor.available
+            and self.ready
+            and self.planner is not None
+        )
+
+        # -----------------------------------------------------
+        # SAFE HOLD / Disabled / Hardware not ready
+        # -----------------------------------------------------
+        if not can_control:
+            # 다시 유효한 입력이 들어오면 즉시 한 번 명령할 수 있도록
+            # command gate를 초기화한다.
+            self.last_command_time = 0.0
+
+            if (
+                not input_valid
+                or user_x_m is None
+            ):
+                self.hold_reason = "SAFE_HOLD"
+                self.last_error = (
+                    input_state.get("last_error")
+                    or "Motor1/2 사용자 위치 입력이 유효하지 않습니다."
+                )
+
+            elif not self.enabled:
+                self.hold_reason = "DISABLED"
+                self.last_error = None
+
+            else:
+                self.hold_reason = "NOT_READY"
+
+            self.latest_state = self._build_state(False)
+            return self.latest_state
+
+        try:
+            self.last_user_x_m = float(user_x_m)
+
+        except (TypeError, ValueError) as error:
+            self.last_success = False
+            self.last_error = (f"Motor1/2 user_x 변환 실패: {error}")
+            self.hold_reason = "ERROR"
+            self.latest_state = self._build_state(False)
+            return self.latest_state
+
+        self.hold_reason = None
+
+        # -----------------------------------------------------
+        # 실제 Servo 명령은 설정값 command_hz로 제한한다.
+        # 현재 설정: 5Hz = 0.2초마다 최대 1회.
+        # -----------------------------------------------------
+        if (
+            now - self.last_command_time
+            < self.command_interval
+        ):
+            self.latest_state = self._build_state(True)
+            return self.latest_state
+
+        self.last_command_time = now
+
+        try:
+            # Planner 호출 직전에 현재 실제각을 다시 읽는다.
+            current = self._read_current_angles()
+
+            # Rest / Recovery가 필요한 위치에서는 일반 추종 이동 금지.
+            block_reason = (self._normal_tracking_block_reason(current))
+
+            if block_reason is not None:
+                self.last_success = False
+                self.hold_reason = block_reason
+                self.last_error = (
+                    "Motor1/2 현재 자세가 일반 자동추종 범위를 "
+                    "벗어나 Recovery가 필요합니다."
+                )
+
+                self.latest_state = self._build_state(False)
+                return self.latest_state
+
+            target = self.planner.plan(
+                current=current,
+                user_x_m=self.last_user_x_m,
+                calibration_ranges=(self._calibration_ranges()),
+            )
+
+            # 사용자와 모니터 사이 X 오차가 deadband 안이면
+            # Planner가 None을 반환한다. 정상적인 '이동 불필요' 상태다.
+            if target is None:
+                self.last_target = None
+                self.last_command_speed = 0
+                self.last_largest_delta_deg = 0.0
+                self.last_success = True
+                self.last_error = None
+                self.hold_reason = "DEADBAND"
+
+                self.latest_state = self._build_state(True)
+                return self.latest_state
+
+            result = self._move_normal_target(target)
+
+            self.last_target = target
+            self.last_command_speed = int(result["speed"])
+            self.last_largest_delta_deg = float(result["largest_delta_deg"])
+            self.last_success = True
+            self.last_error = None
+            self.hold_reason = None
+
+            self.latest_state = self._build_state(True)
+            return self.latest_state
+
+        except Exception as error:
+            self.last_success = False
+            self.last_error = str(error)
+            self.hold_reason = "ERROR"
+
+            self.latest_state = self._build_state(False)
+            return self.latest_state
 
     @staticmethod
     def _axis_state(axis):
         return {
             "servo_id": axis.servo_id,
             "joint": axis.joint,
-            "implemented": False,
+            "implemented": True,
             "ready": bool(axis.ready),
             "max_speed": axis.max_speed,
             "safe_min_deg": axis.safe_min_deg,
@@ -448,12 +674,25 @@ class Motor12Controller:
                 and self.ready
             ),
             "update_hz": self.update_hz,
+            "command_hz": self.command_hz,
+            "pose_speed_mode": self.pose_speed_mode,
+            "pose_max_speed": self.pose_max_speed,
+            "pose_acc": self.pose_acc,
+            "user_x_m": self.last_user_x_m,
+            "target": (
+                None
+                if self.last_target is None
+                else {
+                    MOTOR1_JOINT: float(self.last_target.shoulder_lift_deg),
+                    MOTOR2_JOINT: float(self.last_target.elbow_flex_deg),
+                }
+            ),
+            "command_speed": self.last_command_speed,
+            "largest_delta_deg": (self.last_largest_delta_deg),
+            "last_success": self.last_success,
+            "hold_reason": self.hold_reason,
             "last_error": self.last_error,
-            "motor1": self._axis_state(
-                self.motor1
-            ),
-            "motor2": self._axis_state(
-                self.motor2
-            ),
+            "motor1": self._axis_state(self.motor1),
+            "motor2": self._axis_state(self.motor2),
             "timestamp": time.time(),
         }

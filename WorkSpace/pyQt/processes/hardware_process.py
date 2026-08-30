@@ -267,7 +267,7 @@ def run_hardware_process(
     latest_pose_frame_id = None
     latest_pose_landmarks = None
     latest_pose_landmark_valid = False
-    
+
     # 같은 Pose frame을 빠른 Hardware loop에서 반복 처리하면
     # Vision EMA가 한 프레임에 여러 번 적용될 수 있으므로
     # 마지막 처리 frame과 Vision 결과를 별도 상태로 유지한다.
@@ -840,10 +840,21 @@ def run_hardware_process(
             # ==================================================
             # F. Motor control context
             # ==================================================
-            imu_ready = bool(
-                imu.available and imu.calibrated and not imu.calibrating
+            imu_ready = bool(imu.available and imu.calibrated and not imu.calibrating)
+            # Motor1/2는 모니터 거리 자동추종 장치이므로
+            # CALIBRATING / MEASURING 같은 Main mode에만 묶지 않는다.
+            # 유효한 ToF/Fusion user_x가 존재하는 동안 계속 추종 요청한다.
+            motor12_requested = bool(
+                latest_monitor_arm_input_state.get("valid", False, )
             )
-            motor34_requested = main_mode in ("CALIBRATING", "MEASURING")
+
+            motor12_active = bool(
+                motor12_requested
+                and motor12.ready
+            )
+
+            motor34_requested = main_mode in ("CALIBRATING", "MEASURING", )
+
             motor34_active = bool(
                 motor34_requested
                 and imu_ready
@@ -857,6 +868,14 @@ def run_hardware_process(
                 "imu": latest_imu_state,
                 "pose": latest_pose_state,
                 "face": latest_face_state,
+
+                # Motor12 입력은 한 하위 dict로만 전달해서
+                # 기존 context 구조가 여러 flat key로 늘어나지 않도록 한다.
+                "motor12": {
+                    "control_active": motor12_active,
+                    "input": latest_monitor_arm_input_state,
+                },
+
                 "motor34_control_active": motor34_active,
             }
 
