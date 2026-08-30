@@ -131,6 +131,15 @@ def run_hardware_process(
 
     imu_opened = imu.open()
     motor_bus_opened = motor_service.open()
+
+    # Motor1/2와 Motor3/4는 모두 필수 하드웨어다.
+    # 하나의 MotorService가 Serial bus를 소유한 상태에서
+    # 각 Controller가 자신의 Servo 준비 상태를 검사한다.
+    motor12_opened = bool(
+        motor_bus_opened
+        and motor12.initialize()
+    )
+
     motor34_opened = bool(
         motor_bus_opened
         and (motor34.motor3_config_enabled or motor34.motor4_config_enabled)
@@ -163,7 +172,7 @@ def run_hardware_process(
 
     def apply_runtime_config(new_config):
         """PyQt UPDATE_CONFIG -> 현재 Runtime 객체에 즉시 반영."""
-        nonlocal config_data, control, imu_opened, motor_bus_opened, motor34_opened
+        nonlocal config_data, control, imu_opened, motor_bus_opened, motor12_opened, motor34_opened
 
         config_data = new_config
         control = config_data["control"]
@@ -180,24 +189,69 @@ def run_hardware_process(
         else:
             motor_bus_opened = True
 
+        # Motor bus가 복구되었거나 이미 열려 있다면 Motor1/2도
+        # 필수 하드웨어 준비 상태를 다시 확보한다.
+        if motor_bus_opened:
+            motor12_opened = bool(
+                motor12.ready or motor12.initialize()
+            )
+        else:
+            motor12_opened = False
+
         if motor_bus_opened and (motor34.motor3_config_enabled or motor34.motor4_config_enabled):
             motor34_opened = motor34.initialize()
         else:
             motor34_opened = False
 
-        return bool(imu_opened and motor34_opened)
+        return bool(
+            imu_opened
+            and motor12_opened
+            and motor12.ready
+            and motor34_opened
+            and motor34.ready
+        )
 
     def build_ready_event():
-        all_ready = bool(imu_opened and motor34_opened and motor34.ready)
+        motor12_ready = bool(
+            motor12_opened and motor12.ready
+        )
+        motor34_ready = bool(
+            motor34_opened and motor34.ready
+        )
+
+        # IMU + Motor1/2 + Motor3/4가 모두 준비되어야
+        # POCO Hardware 전체가 실제 측정 가능한 상태로 판단된다.
+        all_ready = bool(
+            imu_opened
+            and motor12_ready
+            and motor34_ready
+        )
+
         errors = []
+
         if not imu_opened:
-            errors.append(f"IMU 실패: {imu.last_error}")
+            errors.append(
+                f"IMU 실패: {imu.last_error}"
+            )
+
         if not motor_bus_opened:
-            errors.append(f"Motor Bus 실패: {motor_service.last_error}")
-        elif not motor34_opened:
-            errors.append(f"Motor3/4 실패: {motor34.last_error}")
+            errors.append(
+                f"Motor Bus 실패: {motor_service.last_error}"
+            )
+        else:
+            if not motor12_ready:
+                errors.append(
+                    f"Motor1/2 실패: {motor12.last_error}"
+                )
+
+            if not motor34_ready:
+                errors.append(
+                    f"Motor3/4 실패: {motor34.last_error}"
+                )
+
         if not motor34.motor3_config_enabled:
             errors.append("Motor3 Disabled")
+
         if not motor34.motor4_config_enabled:
             errors.append("Motor4 Disabled")
 
@@ -206,11 +260,16 @@ def run_hardware_process(
             "ready": True,
             "content_ready": all_ready,
             "imu_ready": bool(imu_opened),
-            "motor_ready": bool(motor34_opened and motor34.ready),
+            "motor_ready": bool(
+                motor12_ready and motor34_ready
+            ),
+            "motor12_ready": motor12_ready,
+            "motor34_ready": motor34_ready,
             "message": (
-                "Hardware Process IMU/Motor3/4 준비 완료"
+                "Hardware Process IMU/Motor1~4 준비 완료"
                 if all_ready
-                else "Hardware 일부 준비 실패 / " + " / ".join(errors)
+                else "Hardware 일부 준비 실패 / "
+                + " / ".join(errors)
             ),
             "config_path": str(config_service.path),
             "timestamp": time.time(),
@@ -259,8 +318,13 @@ def run_hardware_process(
                         imu.cancel_calibration()
 
                     missing = []
+
                     if not imu_opened:
                         missing.append("IMU")
+
+                    if not motor12_opened or not motor12.ready:
+                        missing.append("Motor1/2")
+
                     if not motor34_opened or not motor34.ready:
                         missing.append("Motor3/4")
 
@@ -389,22 +453,28 @@ def run_hardware_process(
                     continue
 
                 if event_type == "MOTOR_ENABLE":
+                    # 전역 Motor 명령이므로 Motor1/2와 Motor3/4를
+                    # 동일하게 runtime 제어 가능 상태로 전환한다.
+                    motor12.set_enabled(True)
                     motor34.set_enabled(True)
+
                     _put_hardware_event(
                         hw_to_main_event_queue,
                         "MOTOR_ENABLE_ACK",
                         success=True,
-                        message="Motor3/4 runtime 제어 허용",
+                        message="Motor1~4 runtime 제어 허용",
                     )
                     continue
 
                 if event_type == "MOTOR_DISABLE":
+                    motor12.set_enabled(False)
                     motor34.set_enabled(False)
+
                     _put_hardware_event(
                         hw_to_main_event_queue,
                         "MOTOR_DISABLE_ACK",
                         success=True,
-                        message="Motor3/4 runtime 제어 차단",
+                        message="Motor1~4 runtime 제어 차단",
                     )
                     continue
 
@@ -547,13 +617,49 @@ def run_hardware_process(
             if latest_pose_landmark_valid:
                 pass
 
-            # 기존 Main 코드와 호환되는 motor3/motor4 key를 유지하면서
-            # motor1/2와 공통 bus 정보도 함께 제공한다.
+            # 기존 Motor3/4 최상위 진단값(command_hz, axis_mapping 등)은
+            # 호환성을 위해 유지한다. 대신 available/enabled/ready/control_active는
+            # Motor12 + Motor34 전체를 나타내도록 집계하고, 두 Controller 그룹을
+            # motor12/motor34로 대칭 제공한다. 개별 motor1~4 key도 계속 유지한다.
             latest_motor_state = dict(latest_motor34_state)
+
+            latest_motor_state["available"] = bool(
+                latest_motor12_state.get("available", False)
+                and latest_motor34_state.get("available", False)
+            )
+
+            latest_motor_state["enabled"] = bool(
+                latest_motor12_state.get("enabled", False)
+                and latest_motor34_state.get("enabled", False)
+            )
+
+            latest_motor_state["ready"] = bool(
+                latest_motor12_state.get("ready", False)
+                and latest_motor34_state.get("ready", False)
+            )
+
+            latest_motor_state["control_active"] = bool(
+                latest_motor12_state.get("control_active", False)
+                or latest_motor34_state.get("control_active", False)
+            )
+
             latest_motor_state["bus"] = motor_service.get_state()
+
             latest_motor_state["motor12"] = dict(latest_motor12_state)
-            latest_motor_state["motor1"] = dict(latest_motor12_state["motor1"])
-            latest_motor_state["motor2"] = dict(latest_motor12_state["motor2"])
+            latest_motor_state["motor34"] = dict(latest_motor34_state)
+
+            latest_motor_state["motor1"] = dict(
+                latest_motor12_state["motor1"]
+            )
+            latest_motor_state["motor2"] = dict(
+                latest_motor12_state["motor2"]
+            )
+            latest_motor_state["motor3"] = dict(
+                latest_motor34_state["motor3"]
+            )
+            latest_motor_state["motor4"] = dict(
+                latest_motor34_state["motor4"]
+            )
 
             # ==================================================
             # G. Hardware -> Main/Pose/Face 최신 State (20Hz)
@@ -564,7 +670,13 @@ def run_hardware_process(
                 state = {
                     "type": "HARDWARE_STATE",
                     "ready": True,
-                    "content_ready": bool(imu_opened and motor34.ready),
+                    "content_ready": bool(
+                        imu_opened
+                        and motor12_opened
+                        and motor12.ready
+                        and motor34_opened
+                        and motor34.ready
+                    ),
                     "timestamp": time.time(),
                     "workflow_state": workflow_state,
                     "main_mode": main_mode,
@@ -602,6 +714,9 @@ def run_hardware_process(
             time.sleep(HARDWARE_LOOP_SLEEP_SEC)
 
     finally:
+        # 각 Controller의 runtime 상태를 먼저 정리한 뒤
+        # 공통 MotorService Serial bus를 마지막에 닫는다.
+        motor12.close()
         motor34.close()
         motor_service.close()
         imu.close()
