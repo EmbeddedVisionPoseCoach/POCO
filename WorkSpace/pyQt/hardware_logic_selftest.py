@@ -1,4 +1,4 @@
-"""RPi 실물 없이 Direct IMU / Motor3/4 통합 핵심 계산을 검증하는 self-test."""
+"""RPi 실물 없이 IMU / ToF-Vision / Motor1~4 / Rest-Recovery 핵심 경로를 검증하는 self-test."""
 import json
 import tempfile
 import time
@@ -21,9 +21,24 @@ from services.hardware_constants import (
 )
 from services.hardware_state_store import HardwareRuntimeStateStore
 from services.imu_service import ADXL345IMUService
+from services.monitor_arm_user_x import (
+    EyeGapVisionDistanceEstimator,
+    ToFUserXSource,
+    UserXFusion,
+    measure_pose_eye_gap,
+)
 from services.motor_service import MotorService
 from services.motor12_controller import Motor12Controller
 from services.motor34_controller import Motor34Controller
+from services.tof_service import FixedToFSensorService
+
+
+WORKSPACE_DIR = Path(__file__).resolve().parents[1]
+MONITOR_ARM_SETTINGS_FILE = (
+    WORKSPACE_DIR
+    / "config"
+    / "monitor_arm_settings.json"
+)
 
 
 def _pack_signed(value):
@@ -65,21 +80,140 @@ class FakeCalibration:
 
 
 class FakeController:
+    """실제 Servo 없이 Motor1~4 명령 경계를 검증하는 Fake Controller."""
+
     def __init__(self, calibration_file=None):
         self.calibration = FakeCalibration()
+
         self.read_count = 0
+
+        # Motor3/4 단일 Joint 명령
         self.moves = []
 
-    def get_joint_angle(self, _joint):
-        self.read_count += 1
-        return 0.0
+        # Motor1/2 일반 SyncWrite
+        self.sync_moves = []
 
-    def move_joint(self, joint, angle, speed, acc=10, wait=False):
-        self.moves.append((joint, angle, speed, acc, wait))
+        # Motor1/2 Rest / Recovery 특수 SyncWrite
+        self.special_sync_moves = []
+
+        # 실제 Servo의 현재 TEAM 각도를 흉내 낸다.
+        self.angles = {
+            "shoulder_lift": 0.0,
+            "elbow_flex": 0.0,
+            "wrist_flex": 0.0,
+            "wrist_roll": 0.0,
+        }
+
+    def reset_trace(self):
+        """현재 각도는 유지하고 명령/읽기 기록만 초기화한다."""
+        self.read_count = 0
+        self.moves.clear()
+        self.sync_moves.clear()
+        self.special_sync_moves.clear()
+
+    def get_joint_angle(self, joint):
+        self.read_count += 1
+        return self.angles[joint]
+
+    def move_joint(
+        self,
+        joint,
+        angle,
+        speed,
+        acc=10,
+        wait=False,
+    ):
+        angle = float(angle)
+
+        self.moves.append(
+            (
+                joint,
+                angle,
+                speed,
+                acc,
+                wait,
+            )
+        )
+
+        self.angles[joint] = angle
         return True
 
-    def move_joint_relative(self, joint, delta_angle, speed, acc=10, wait=False):
-        self.moves.append((joint, delta_angle, speed, acc, wait))
+    def move_joint_relative(
+        self,
+        joint,
+        delta_angle,
+        speed,
+        acc=10,
+        wait=False,
+    ):
+        delta_angle = float(delta_angle)
+
+        self.moves.append(
+            (
+                joint,
+                delta_angle,
+                speed,
+                acc,
+                wait,
+            )
+        )
+
+        self.angles[joint] += delta_angle
+        return True
+
+    def move_joints(
+        self,
+        targets,
+        speed,
+        acc=10,
+        wait=False,
+    ):
+        """Motor1/2 일반 pair SyncWrite를 기록한다."""
+        normalized = {
+            str(joint): float(angle)
+            for joint, angle
+            in dict(targets).items()
+        }
+
+        self.sync_moves.append(
+            {
+                "targets": normalized,
+                "speed": int(speed),
+                "acc": int(acc),
+                "wait": bool(wait),
+            }
+        )
+
+        # Fake에서는 명령을 받으면 즉시 목표에 도달했다고 가정한다.
+        self.angles.update(normalized)
+
+        return True
+
+    def move_joints_special(
+        self,
+        targets,
+        speed,
+        acc=10,
+        wait=False,
+    ):
+        """Motor1/2 Rest/Recovery 특수 SyncWrite를 기록한다."""
+        normalized = {
+            str(joint): float(angle)
+            for joint, angle
+            in dict(targets).items()
+        }
+
+        self.special_sync_moves.append(
+            {
+                "targets": normalized,
+                "speed": int(speed),
+                "acc": int(acc),
+                "wait": bool(wait),
+            }
+        )
+
+        self.angles.update(normalized)
+
         return True
 
     def close(self):
@@ -87,6 +221,134 @@ class FakeController:
 
 
 def main():
+    # --------------------------------------------------------
+    # Motor1/2 고정 프로젝트 설정
+    # --------------------------------------------------------
+    monitor_arm_settings = json.loads(
+        MONITOR_ARM_SETTINGS_FILE.read_text(
+            encoding="utf-8"
+        )
+    )
+
+    # 현재 POCO 통합 기준값이 바뀌지 않았는지 먼저 확인한다.
+    assert (
+        monitor_arm_settings["control"]["command_hz"]
+        == 5.0
+    )
+    assert (
+        monitor_arm_settings["control"]["pose_speed"]
+        == 800
+    )
+    assert (
+        monitor_arm_settings["control"]["pose_acc"]
+        == 20
+    )
+
+    # --------------------------------------------------------
+    # ToF / Vision / User-X Fusion
+    # --------------------------------------------------------
+    # 실제 I2C 없이 fixed ToF로 Sensor -> user X 변환을 검증한다.
+    tof_service = FixedToFSensorService(
+        0.70
+    )
+
+    tof_source = ToFUserXSource(
+        tof_service,
+        sensor_origin_x_m=0.02,
+        minimum_user_x_m=0.60,
+        maximum_user_x_m=0.83,
+    )
+
+    assert tof_source.open()
+
+    # sensor origin 0.02m + ToF 0.70m
+    assert abs(
+        tof_source.read_user_x_m()
+        - 0.72
+    ) < 1e-9
+
+    # POCO PoseProcess와 같은 [x, y, z, visibility] landmark 형식.
+    landmarks = [
+        [0.0, 0.0, 0.0, 1.0]
+        for _ in range(6)
+    ]
+
+    landmarks[2] = [
+        0.40,
+        0.45,
+        0.0,
+        1.0,
+    ]
+
+    landmarks[5] = [
+        0.60,
+        0.45,
+        0.0,
+        1.0,
+    ]
+
+    eye = measure_pose_eye_gap(
+        landmarks,
+        320,
+        240,
+    )
+
+    assert eye is not None
+
+    # 320px * (0.60 - 0.40)
+    assert abs(
+        eye.gap_px
+        - 64.0
+    ) < 1e-9
+
+    estimator = (
+        EyeGapVisionDistanceEstimator(
+            minimum_eye_gap_px=5.0,
+            minimum_distance_m=0.20,
+            maximum_distance_m=1.20,
+            filter_alpha=1.0,
+        )
+    )
+
+    # 기준: 64px = 0.5m
+    estimator.calibrate(
+        64.0,
+        0.50,
+    )
+
+    # 눈 간격이 80px로 커지면
+    # 0.5 * 64 / 80 = 0.4m
+    assert abs(
+        estimator.estimate_distance_m(80.0)
+        - 0.40
+    ) < 1e-9
+
+    fusion = UserXFusion(
+        0.7,
+        0.3,
+    )
+
+    # ToF 70% + Vision 30%
+    assert abs(
+        fusion.fuse(
+            0.70,
+            0.80,
+        )
+        - 0.73
+    ) < 1e-9
+
+    # Vision이 없으면 ToF 단독값.
+    assert abs(
+        fusion.fuse(
+            0.70,
+            None,
+        )
+        - 0.70
+    ) < 1e-9
+
+    tof_source.close()
+
+
     # --------------------------------------------------------
     # Hardware constants
     # --------------------------------------------------------
@@ -215,34 +477,243 @@ def main():
     imu.close()
 
     # --------------------------------------------------------
-    # Shared MotorService + Motor12 untouched + Motor34 Direct
+    # Shared MotorService
+    # Motor12 Auto Tracking / Rest / Recovery
+    # Motor34 Direct
     # --------------------------------------------------------
     with tempfile.TemporaryDirectory() as td:
-        servo_file = Path(td) / "servo.json"
-        servo_file.write_text(json.dumps({"servos": {"3": {}}}), encoding="utf-8")
+        servo_file = (Path(td) / "servo.json")
+
+        # FakeController가 자체 FakeCalibration을 사용하므로
+        # 실제 Calibration 내용은 필요 없고 파일 존재만 만족시킨다.
+        servo_file.write_text(
+            json.dumps({"servos": {}, }) , encoding="utf-8", )
+
         made = {}
 
-        def controller_factory(calibration_file=None):
+        def controller_factory(calibration_file=None, ):
             controller = FakeController(calibration_file)
-            made["controller"] = controller
+
+            made["controller"] = (controller)
+
             return controller
 
         motor = MotorService(
             calibration_file=servo_file,
             controller_factory=controller_factory,
         )
+
         assert motor.open()
 
-        motor12 = Motor12Controller(motor, update_hz=1000)
+        # ====================================================
+        # Motor1/2
+        # ====================================================
+        motor12 = Motor12Controller(
+            motor,
+            settings=monitor_arm_settings,
+            update_hz=1000,
+        )
+
+        # ====================================================
+        # Motor3/4
+        # ====================================================
         motor34 = Motor34Controller(motor)
-        motor34.apply_control_config({
-            "command_hz": 1000,
-            "auto_speed": 500,
-            "auto_acc": 12,
-            "motor3": {"enabled": True, "direction_sign": +1.0},
-            "motor4": {"enabled": True, "direction_sign": +1.0},
-        })
+
+        motor34.apply_control_config(
+            {
+                "command_hz": 1000,
+                "auto_speed": 500,
+                "auto_acc": 12,
+                "motor3": {
+                    "enabled": True,
+                    "direction_sign": +1.0,
+                },
+                "motor4": {
+                    "enabled": True,
+                    "direction_sign": +1.0,
+                },
+            }
+        )
+
+        # Motor1~4 모두 같은 MotorService를 공유하면서
+        # 각자의 Calibration / Servo ID / Ping / 범위를 검사한다.
+        assert motor12.initialize()
         assert motor34.initialize()
+
+        fake = made["controller"]
+
+        # ====================================================
+        # Motor1/2 정상 자동추종
+        # ====================================================
+        monitor_input = {
+            "available": True,
+            "valid": True,
+            "tof_user_x_m": 0.80,
+            "vision_user_x_m": None,
+            "user_x_m": 0.80,
+            "fusion_mode": "TOF_ONLY",
+            "eye_gap_px": None,
+            "last_error": None,
+        }
+
+        now = 10.0
+
+        motor12_context = {
+            "now": now,
+            "motor12": {
+                "control_active": True,
+                "input": monitor_input,
+            },
+        }
+
+        state12 = motor12.update(motor12_context)
+
+        assert (state12["control_active"] is True)
+
+        # shoulder + elbow는 하나의 SyncWrite.
+        assert len(fake.sync_moves) == 1
+
+        normal_move = (fake.sync_moves[-1])
+
+        assert set(normal_move["targets"]) == {
+            "shoulder_lift",
+            "elbow_flex",
+        }
+
+        # 현재 설정의 adaptive 범위.
+        assert (150 <= normal_move["speed"] <= 800)
+
+        assert (normal_move["acc"] == 20)
+
+        assert (normal_move["wait"] is False)
+
+        # ====================================================
+        # Motor12 command_hz = 5Hz
+        # ====================================================
+        # 0.05초 뒤 update는 가능하지만
+        # 실제 Servo command 0.2초 gate에는 걸린다.
+        motor12_context["now"] = (now + 0.05)
+
+        motor12.update(motor12_context)
+
+        assert len(fake.sync_moves) == 1
+
+        # ====================================================
+        # ToF/Fusion invalid -> SAFE_HOLD
+        # ====================================================
+        invalid_input = dict(monitor_input)
+
+        invalid_input.update(
+            {
+                "valid": False,
+                "user_x_m": None,
+                "last_error": (
+                    "ToF unavailable"
+                ),
+            }
+        )
+
+        motor12_context["now"] = (now + 0.30)
+
+        motor12_context["motor12"]["input"] = invalid_input
+
+        state12 = motor12.update(motor12_context)
+
+        assert (state12["hold_reason"] == "SAFE_HOLD")
+
+        # 잘못된 센서 입력으로 추가 이동하면 안 된다.
+        assert len(fake.sync_moves) == 1
+
+        # ====================================================
+        # Rest 특수 자세
+        # ====================================================
+        motor12_context["motor12"]["input"] = monitor_input
+
+        rest_result = (motor12.move_to_rest())
+
+        assert (rest_result["accepted"] is True)
+
+        assert len(fake.special_sync_moves) == 1
+
+        rest_move = (fake.special_sync_moves[-1])
+
+        assert (rest_move["targets"] == {
+                "shoulder_lift": 107.75,
+                "elbow_flex": -92.55,
+            }
+        )
+
+        assert (rest_move["speed"] == 200)
+
+        assert (rest_move["acc"] == 10)
+
+        assert (rest_move["wait"] is False)
+
+        # ====================================================
+        # Rest latch
+        # ====================================================
+        regular_before_rest_hold = len(fake.sync_moves)
+
+        special_before_rest_hold = len(fake.special_sync_moves)
+
+        motor12_context["now"] = (now + 0.60)
+
+        state12 = motor12.update(motor12_context)
+
+        assert (state12["hold_reason"] == "REST")
+
+        # ToF가 유효해도 Rest 중에는 추종하지 않는다.
+        assert len(fake.sync_moves) == regular_before_rest_hold
+
+        assert len(fake.special_sync_moves) == special_before_rest_hold
+
+        # ====================================================
+        # Resume -> inward-only Recovery
+        # ====================================================
+        resume_result = (motor12.resume_from_rest())
+
+        assert (resume_result["accepted"] is True)
+
+        regular_before_recovery = len(fake.sync_moves)
+
+        special_before_recovery = len(fake.special_sync_moves)
+
+        recovery_complete = False
+        recovery_now = (now + 0.90)
+
+        # Fake에서는 각 명령을 받으면 즉시 목표에 도달한다고
+        # 가정하므로 최대 60 command 안에서 작업자세로 돌아와야 한다.
+        for _ in range(60):
+            motor12_context["now"] = recovery_now
+
+            state12 = motor12.update(motor12_context)
+
+            recovery_now += 0.25
+
+            if (state12["hold_reason"] == "RECOVERY_COMPLETE"):
+                recovery_complete = True
+                break
+
+        assert recovery_complete
+
+        # Calibration 밖에서는 특수 SyncWrite가 실제 사용돼야 한다.
+        assert len(fake.special_sync_moves) > special_before_recovery
+
+        # Calibration 안으로 들어온 뒤에는 일반 SyncWrite로 전환돼야 한다.
+        assert len(fake.sync_moves) > regular_before_recovery
+
+        assert (state12["recovery_active"] is False)
+
+        assert abs(fake.angles["shoulder_lift"]) <= 0.25
+
+        assert abs(fake.angles["elbow_flex"]) <= 0.25
+
+        # ====================================================
+        # Motor3/4 기존 Direct IMU 테스트
+        # ====================================================
+        # Motor12 테스트가 남긴 read/write trace만 제거한다.
+        # 각도 상태 자체는 그대로 유지한다.
+        fake.reset_trace()
 
         zero_imu = {
             "available": True,
@@ -253,63 +724,100 @@ def main():
             "motor3_correction_speed_deg_s": 0.0,
             "motor4_correction_speed_deg_s": 0.0,
         }
+
         context = {
             "now": time.monotonic(),
             "imu": zero_imu,
             "motor34_control_active": True,
         }
 
-        # 1/2번은 현재 pass. 기존 로직을 건드리지 않는다.
-        motor12.update(context)
-        assert len(made["controller"].moves) == 0
-
-        # Closed loop 첫 진입은 M3/M4 현재각을 각각 1회 읽고,
-        # V1.9처럼 고정 Speed/Acc로 현재 target을 write한다.
+        # Closed loop 첫 진입은 M3/M4 현재각을 각각 1회 읽는다.
         motor34.update(context)
-        assert made["controller"].read_count == 2
-        assert len(made["controller"].moves) == 2
-        assert made["controller"].moves[0][0] == "wrist_flex"
-        assert made["controller"].moves[1][0] == "wrist_roll"
-        assert made["controller"].moves[0][2] == 500
-        assert made["controller"].moves[0][3] == 12
 
-        # IMU Y PID -> Motor3 target 변화. Motor4는 같은 target 유지.
+        assert (fake.read_count == 2)
+
+        assert len(fake.moves) == 2
+
+        assert (fake.moves[0][0] == "wrist_flex")
+
+        assert (fake.moves[1][0] == "wrist_roll")
+
+        assert (fake.moves[0][2] == 500)
+
+        assert (fake.moves[0][3] == 12)
+
+        # ----------------------------------------------------
+        # IMU Y PID -> Motor3
+        # ----------------------------------------------------
         time.sleep(0.002)
+
         moving_y = dict(zero_imu)
+
         moving_y["imu_y_error_g"] = 0.05
+
         moving_y["motor3_correction_speed_deg_s"] = -6.0
-        context["now"] = time.monotonic()
-        context["imu"] = moving_y
+
+        context["now"] = (time.monotonic())
+
+        context["imu"] = (moving_y)
+
         state = motor34.update(context)
 
-        assert len(made["controller"].moves) == 4
-        m3_move = made["controller"].moves[-2]
-        m4_move = made["controller"].moves[-1]
-        assert m3_move[0] == "wrist_flex"
-        assert m4_move[0] == "wrist_roll"
-        assert m3_move[1] < 0.0  # TEAM angle: output -6 * sign +1 => - target
+        assert len(fake.moves) == 4
+
+        m3_move = (fake.moves[-2])
+
+        m4_move = (fake.moves[-1])
+
+        assert (m3_move[0] == "wrist_flex")
+
+        assert (m4_move[0] == "wrist_roll")
+
+        assert (m3_move[1] < 0.0)
+
         assert abs(m4_move[1]) < 1e-9
-        assert state["motor3"]["axis"] == "imu_y"
-        assert state["motor4"]["axis"] == "imu_x"
 
-        # IMU X PID -> Motor4 target 변화.
+        assert (state["motor3"]["axis"] == "imu_y")
+
+        assert (state["motor4"]["axis"] == "imu_x")
+
+        # ----------------------------------------------------
+        # IMU X PID -> Motor4
+        # ----------------------------------------------------
         time.sleep(0.002)
+
         moving_x = dict(zero_imu)
+
         moving_x["imu_x_error_g"] = 0.05
+
         moving_x["motor4_correction_speed_deg_s"] = -6.0
-        context["now"] = time.monotonic()
-        context["imu"] = moving_x
+
+        context["now"] = (time.monotonic())
+
+        context["imu"] = (moving_x)
+
         state = motor34.update(context)
 
-        assert len(made["controller"].moves) == 6
-        m4_move = made["controller"].moves[-1]
-        assert m4_move[0] == "wrist_roll"
-        assert m4_move[1] < 0.0
-        assert state["axis_mapping"] == {"motor3": "imu_y", "motor4": "imu_x"}
+        assert len(fake.moves) == 6
+
+        m4_move = (fake.moves[-1])
+
+        assert (m4_move[0] == "wrist_roll")
+
+        assert (m4_move[1] < 0.0)
+
+        assert (state["axis_mapping"] == {
+                "motor3": "imu_y",
+                "motor4": "imu_x",
+            }
+        )
 
         motor.close()
 
-    print("Hardware logic self-test: PASS")
+    print(
+    "Hardware logic self-test: PASS "
+    "(IMU / ToF-Vision / Motor1~4 / Rest-Recovery)"
+)
 
 
 if __name__ == "__main__":
