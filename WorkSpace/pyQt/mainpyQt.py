@@ -801,15 +801,6 @@ class MainWindow(QMainWindow):
             "알림 설정이 저장되었습니다."
         )
 
-        # 절대 여기서 ensure_camera_worker() 호출하지 않기
-        # 설정 저장만 했는데 카메라가 켜지는 원인이 됨
-
-        QMessageBox.information(
-            self,
-            "설정 저장",
-            "알림 설정이 저장되었습니다."
-        )
-
 
     def on_alarm_enabled_toggled(self, checked):
         """

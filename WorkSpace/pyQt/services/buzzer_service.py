@@ -280,12 +280,12 @@ class BuzzerService:
             )
             return False
 
-        # 기존 Arduino Serial처럼 발생 순서를 유지한다.
+        # 발생 순서를 유지한다.
         self._pending_patterns.append(pattern)
 
         # 현재 아무 Pattern도 실행 중이지 않으면 즉시 시작한다.
         if self._phase == "IDLE":
-            self._start_next_pattern(
+            return self._start_next_pattern(
                 time.monotonic()
             )
 
@@ -378,10 +378,14 @@ class BuzzerService:
     def _start_next_pattern(self, now):
         """
         Pending Pattern 중 가장 먼저 요청된 Pattern을 시작한다.
+
+        실제 PWM 출력을 시작하는 순간 GPIO backend 오류가 발생해도
+        Hardware Process 전체로 예외가 전파되지 않도록
+        이 함수 내부에서 실패를 처리한다.
         """
 
         if not self._pending_patterns:
-            return
+            return False
 
         pattern = self._pending_patterns.popleft()
 
@@ -401,8 +405,25 @@ class BuzzerService:
             pattern["off_sec"]
         )
 
-        # Pattern은 항상 ON부터 시작한다.
-        self._set_output(True)
+        try:
+            # Pattern은 항상 ON부터 시작한다.
+            self._set_output(True)
+
+        except Exception as error:
+            self.last_error = str(error)
+
+            print(
+                "[BuzzerService] PWM 시작 오류: "
+                f"{error}"
+            )
+
+            # GPIO 오류가 발생하면 현재 Pattern과
+            # 아직 실행되지 않은 Pending Pattern을 안전하게 제거한다.
+            self.stop(
+                clear_pending=True
+            )
+
+            return False
 
         self._phase = "ON"
         self._phase_deadline = (
@@ -414,6 +435,8 @@ class BuzzerService:
             f"command={self._active_command}, "
             f"repeat={self._remaining_count}"
         )
+
+        return True
 
     def _finish_current_pattern(self):
         """

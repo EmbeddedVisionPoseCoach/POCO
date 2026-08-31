@@ -324,10 +324,6 @@ def run_hardware_process(
     # 마지막으로 Alert 판단에 사용한 Pose frame ID를 기억한다.
     last_alert_pose_frame_id = None
 
-    # MEASURING 진입/종료 시 Alert tracking 상태를
-    # 한 번만 초기화하기 위한 Runtime flag.
-    alert_measurement_active = False
-
     # 같은 Pose frame을 빠른 Hardware loop에서 반복 처리하면
     # Vision EMA가 한 프레임에 여러 번 적용될 수 있으므로
     # 마지막 처리 frame과 Vision 결과를 별도 상태로 유지한다.
@@ -1445,20 +1441,6 @@ def run_hardware_process(
             )
 
             if measuring_for_alert:
-
-                # MEASURING에 새로 진입한 순간.
-                if not alert_measurement_active:
-                    alert_measurement_active = True
-                    last_alert_pose_frame_id = None
-
-                    # 이전 PREVIEW / CALIBRATION 세션에서 진행 중이던
-                    # 자세 유지시간 및 연속 Alert tracking은 제거한다.
-                    #
-                    # 단, 이미 발생한 StrongAlert cooldown은 유지한다.
-                    posture_alert.reset_tracking(
-                        preserve_cooldowns=True
-                    )
-
                 pose_inference = None
 
                 if isinstance(
@@ -1471,8 +1453,11 @@ def run_hardware_process(
                         )
                     )
 
-                # GRU 결과가 존재하고,
-                # 아직 Alert 판단에 사용하지 않은 새 Pose frame일 때만 처리.
+                # Hardware Process는 약 2ms 주기로 반복되지만
+                # Pose Process의 GRU 결과는 그보다 느리게 갱신된다.
+                #
+                # 따라서 같은 Pose frame을 반복해서 Alert 판단에
+                # 사용하지 않고 새 frame_id가 들어왔을 때만 처리한다.
                 if (
                     isinstance(
                         pose_inference,
@@ -1500,42 +1485,31 @@ def run_hardware_process(
                         )
                     )
 
-                    # None:
+                    # PostureAlertService 판단 결과:
+                    #
+                    # None
                     #   아직 유지시간 미충족 또는 Cooldown 중
                     #
-                    # Optimal:
-                    #   BuzzerService 내부에서 소리를 내지 않음
+                    # Optimal
+                    #   정상 자세. BuzzerService에서는 소리를 내지 않는다.
                     #
-                    # Asymmetric / ForwardHead / ChinPropping:
+                    # Asymmetric / ForwardHead / ChinPropping
                     #   일반 자세 Alert
                     #
-                    # StrongAlert:
-                    #   강한 Alert
+                    # StrongAlert
+                    #   강한 자세 Alert
                     if alert_command is not None:
                         buzzer.play_command(
                             alert_command,
                             posture_alert_count,
                         )
 
-            else:
-                # MEASURING에서 빠져나가는 순간에만 한 번 실행한다.
-                #
-                # PREPARING / CALIBRATING / PREVIEW 상태에
-                # 이전 자세 경고가 남아 울리지 않도록 정리한다.
-                if alert_measurement_active:
-                    alert_measurement_active = False
-                    last_alert_pose_frame_id = None
-
-                    posture_alert.reset_tracking(
-                        preserve_cooldowns=True
-                    )
-
-                    buzzer.stop(
-                        clear_pending=True
-                    )
-
             # BuzzerService는 sleep()을 사용하지 않는
-            # non-blocking 상태머신이므로 Hardware loop마다 갱신한다.
+            # non-blocking 상태머신이다.
+            #
+            # MEASURING이 끝나더라도 이미 시작된 Alert는
+            # 현재 Pattern까지 정상적으로
+            # 마무리할 수 있도록 update()는 계속 호출한다.
             latest_buzzer_state = (
                 buzzer.update(
                     now=now
