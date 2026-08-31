@@ -3,8 +3,11 @@ import time
 from pathlib import Path
 
 from modules.config import FRAME_HEIGHT, FRAME_WIDTH
+from modules.app_settings import AlarmSettings, SettingsManager
 
 from ipc.queue_utils import drain_ordered, get_latest, put_latest, put_ordered
+from services.buzzer_service import BuzzerService
+from services.posture_alert_service import PostureAlertService
 from services.hardware_config_service import HardwareConfigService
 from services.imu_service import ADXL345IMUService
 from services.monitor_arm_calibration_service import (
@@ -30,6 +33,7 @@ HARDWARE_LOOP_SLEEP_SEC = 0.002
 
 WORKSPACE_DIR = Path(__file__).resolve().parents[2]
 MONITOR_ARM_SETTINGS_FILE = WORKSPACE_DIR / "config" / "monitor_arm_settings.json"
+ALARM_SETTINGS_FILE = WORKSPACE_DIR / "data" / "settings" / "alarm_settings.json"
 
 HW_IDLE = "IDLE"
 HW_IMU_OFFSET_CALIBRATING = "IMU_OFFSET_CALIBRATING"
@@ -131,6 +135,17 @@ def run_hardware_process(
     monitor_arm_settings = _load_monitor_arm_settings()
 
     # --------------------------------------------------------
+    # Pose 자세 알림 설정
+    # --------------------------------------------------------
+    # PyQt가 저장한 alarm_settings.json을 Hardware Process에서도
+    # 시작 시 한 번 읽는다.
+    #
+    # 이렇게 하면 사용자가 앱 실행 후 설정 저장 버튼을 다시 누르지 않아도
+    # 이전에 저장해 둔 자세 알림 설정이 바로 적용된다.
+
+    alarm_settings = SettingsManager(ALARM_SETTINGS_FILE).load()
+
+    # --------------------------------------------------------
     # Motor1/2 사용자 위치 입력
     # --------------------------------------------------------
     # 실제 ToF I2C 통신은 tof_service.py가 담당하고,
@@ -203,6 +218,23 @@ def run_hardware_process(
     imu = ADXL345IMUService()
     motor_service = MotorService()
 
+    # --------------------------------------------------------
+    # Pose Alert / Buzzer
+    # --------------------------------------------------------
+    # PostureAlertService:
+    #   Pose 결과를 보고 "언제" 경고할지 판단한다.
+    #
+    # BuzzerService:
+    #   결정된 Alert command를 실제 GPIO18 PWM으로 출력한다.
+    posture_alert = PostureAlertService()
+    posture_alert.apply_settings(alarm_settings)
+
+    # 일반 자세 Alert가 한 번 발생했을 때
+    # 실제 부저를 몇 번 울릴지에 대한 PyQt 설정값.
+    posture_alert_count = int(alarm_settings.posture_Hardware_count)
+
+    buzzer = BuzzerService()
+
     # 실제 제어 로직은 별도 Controller로 분리한다.
     motor12 = Motor12Controller(
         motor_service,
@@ -221,6 +253,12 @@ def run_hardware_process(
     motor34.apply_control_config(control["motor"])
 
     imu_opened = imu.open()
+
+    # Passive Buzzer GPIO18 초기화.
+    #
+    # 실패하더라도 Hardware Process 전체 준비 실패로 보지 않는다.
+    # 자세 추론 / IMU / ToF / Motor는 계속 사용할 수 있다.
+    buzzer_opened = buzzer.open()
 
     # 실제 VL53L0X import/I2C 연결은 ToF Service의 open() 안에서 수행한다.
     # 센서 초기화가 실패해도 HardwareProcess 자체는 종료하지 않고,
@@ -270,6 +308,7 @@ def run_hardware_process(
 
     latest_motor12_state = dict(motor12.latest_state)
     latest_motor34_state = dict(motor34.latest_state)
+    latest_buzzer_state = buzzer.get_state()
 
     # ========================================================
     # 2. IPC 최신 상태
@@ -280,6 +319,14 @@ def run_hardware_process(
     latest_pose_frame_id = None
     latest_pose_landmarks = None
     latest_pose_landmark_valid = False
+
+    # 자세 Alert가 같은 Pose frame을 중복 처리하지 않도록
+    # 마지막으로 Alert 판단에 사용한 Pose frame ID를 기억한다.
+    last_alert_pose_frame_id = None
+
+    # MEASURING 진입/종료 시 Alert tracking 상태를
+    # 한 번만 초기화하기 위한 Runtime flag.
+    alert_measurement_active = False
 
     # 같은 Pose frame을 빠른 Hardware loop에서 반복 처리하면
     # Vision EMA가 한 프레임에 여러 번 적용될 수 있으므로
@@ -722,6 +769,68 @@ def run_hardware_process(
                         success=False,
                         message="PREPARE_CALIBRATION 경로를 사용해주세요.",
                     )
+                    continue
+
+                # =============================================
+                # PyQt 자세 알림 설정 Runtime 반영
+                # =============================================
+                if event_type == "UPDATE_ALARM_SETTINGS":
+                    try:
+                        settings_data = event.get(
+                            "settings",
+                            event.get(
+                                "data",
+                                {},
+                            ),
+                        )
+
+                        if not isinstance(
+                            settings_data,
+                            dict,
+                        ):
+                            raise ValueError(
+                                "alarm settings는 dict여야 합니다."
+                            )
+
+                        # app_settings.py와 동일한 범위 검사를 사용해서
+                        # Hardware Process에서도 안전한 설정값만 사용한다.
+                        alarm_settings = (
+                            AlarmSettings.from_dict(
+                                settings_data
+                            )
+                        )
+
+                        posture_alert.apply_settings(
+                            alarm_settings
+                        )
+
+                        posture_alert_count = int(
+                            alarm_settings
+                            .posture_Hardware_count
+                        )
+
+                        _put_hardware_event(
+                            hw_to_main_event_queue,
+                            "ALARM_SETTINGS_UPDATED",
+                            success=True,
+                            message=(
+                                "자세 알림 설정을 "
+                                "Hardware Process에 반영했습니다."
+                            ),
+                            settings=alarm_settings.to_dict(),
+                        )
+
+                    except Exception as error:
+                        _put_hardware_event(
+                            hw_to_main_event_queue,
+                            "ALARM_SETTINGS_UPDATED",
+                            success=False,
+                            message=(
+                                "자세 알림 설정 반영 실패: "
+                                f"{error}"
+                            ),
+                        )
+
                     continue
 
                 if event_type == "UPDATE_CONFIG":
@@ -1313,6 +1422,127 @@ def run_hardware_process(
             )
 
             # ==================================================
+            # F-2. Pose 자세 알림 -> Passive Buzzer
+            # ==================================================
+            # 자세 경고는 실제 자세 측정(MEASURING) 중에만 동작한다.
+            #
+            # PREPARING:
+            #   모니터암 위치 / ToF / 눈 간격 준비 단계이므로 경고 금지
+            #
+            # CALIBRATING:
+            #   기준 자세를 측정하는 단계이므로 경고 금지
+            #
+            # MEASURING:
+            #   GRU pose_index를 PostureAlertService에 전달
+            #
+            # Hardware loop는 약 2ms로 Pose Process보다 훨씬 빠르다.
+            # 따라서 같은 POSE_STATE를 반복 처리하지 않고
+            # 새 frame_id가 들어왔을 때만 Alert 판단을 수행한다.
+
+            measuring_for_alert = bool(
+                enable_pose
+                and main_mode == "MEASURING"
+            )
+
+            if measuring_for_alert:
+
+                # MEASURING에 새로 진입한 순간.
+                if not alert_measurement_active:
+                    alert_measurement_active = True
+                    last_alert_pose_frame_id = None
+
+                    # 이전 PREVIEW / CALIBRATION 세션에서 진행 중이던
+                    # 자세 유지시간 및 연속 Alert tracking은 제거한다.
+                    #
+                    # 단, 이미 발생한 StrongAlert cooldown은 유지한다.
+                    posture_alert.reset_tracking(
+                        preserve_cooldowns=True
+                    )
+
+                pose_inference = None
+
+                if isinstance(
+                    latest_pose_state,
+                    dict,
+                ):
+                    pose_inference = (
+                        latest_pose_state.get(
+                            "inference"
+                        )
+                    )
+
+                # GRU 결과가 존재하고,
+                # 아직 Alert 판단에 사용하지 않은 새 Pose frame일 때만 처리.
+                if (
+                    isinstance(
+                        pose_inference,
+                        dict,
+                    )
+                    and latest_pose_frame_id
+                    is not None
+                    and latest_pose_frame_id
+                    != last_alert_pose_frame_id
+                ):
+                    last_alert_pose_frame_id = (
+                        latest_pose_frame_id
+                    )
+
+                    pose_index = (
+                        pose_inference.get(
+                            "pose_index"
+                        )
+                    )
+
+                    alert_command = (
+                        posture_alert.update(
+                            pose_index,
+                            now=now,
+                        )
+                    )
+
+                    # None:
+                    #   아직 유지시간 미충족 또는 Cooldown 중
+                    #
+                    # Optimal:
+                    #   BuzzerService 내부에서 소리를 내지 않음
+                    #
+                    # Asymmetric / ForwardHead / ChinPropping:
+                    #   일반 자세 Alert
+                    #
+                    # StrongAlert:
+                    #   강한 Alert
+                    if alert_command is not None:
+                        buzzer.play_command(
+                            alert_command,
+                            posture_alert_count,
+                        )
+
+            else:
+                # MEASURING에서 빠져나가는 순간에만 한 번 실행한다.
+                #
+                # PREPARING / CALIBRATING / PREVIEW 상태에
+                # 이전 자세 경고가 남아 울리지 않도록 정리한다.
+                if alert_measurement_active:
+                    alert_measurement_active = False
+                    last_alert_pose_frame_id = None
+
+                    posture_alert.reset_tracking(
+                        preserve_cooldowns=True
+                    )
+
+                    buzzer.stop(
+                        clear_pending=True
+                    )
+
+            # BuzzerService는 sleep()을 사용하지 않는
+            # non-blocking 상태머신이므로 Hardware loop마다 갱신한다.
+            latest_buzzer_state = (
+                buzzer.update(
+                    now=now
+                )
+            )
+
+            # ==================================================
             # G. Hardware -> Main/Pose/Face 최신 State (20Hz)
             # ==================================================
             if now - last_status_time >= HARDWARE_STATUS_INTERVAL_SEC:
@@ -1367,6 +1597,31 @@ def run_hardware_process(
                         ),
                     },
                     "motor": latest_motor_state,
+
+                    # Passive Buzzer + 자세 Alert Runtime 상태.
+                    #
+                    # Buzzer가 unavailable이어도 content_ready에는
+                    # 영향을 주지 않는다.
+                    "buzzer": {
+                        **dict(
+                            latest_buzzer_state
+                        ),
+
+                        # 일반 자세 Alert에서 실제 삐 소리를
+                        # 몇 회 반복할지에 대한 PyQt 설정.
+                        "posture_count": int(
+                            posture_alert_count
+                        ),
+
+                        # 자세 유지시간 / StrongAlert / Cooldown
+                        # 판단 상태.
+                        "posture_alert": (
+                            posture_alert.get_state(
+                                now=now
+                            )
+                        ),
+                    },
+
                     "gimbal": {
                         "requested": motor34_requested,
                         "active": motor34_active,
@@ -1390,6 +1645,9 @@ def run_hardware_process(
         # HardwareProcess가 소유한 I2C/Serial 장치를 모두 정리한다.
         # 각 Controller의 runtime 상태를 먼저 정리한 뒤
         # 공통 MotorService Serial bus를 마지막에 닫는다.
+        # GPIO PWM을 먼저 OFF하고 Resource를 반환한다.
+        buzzer.close()
+
         monitor_arm_preparation.end()
         tof_source.close()
         motor12.close()

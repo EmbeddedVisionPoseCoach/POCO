@@ -765,10 +765,41 @@ class MainWindow(QMainWindow):
     def on_save_settings_clicked(self):
         settings = self.collect_settings_from_ui()
 
-        self.settings_manager.save(settings)
+        # 기존 POCO 방식 그대로 JSON에는 항상 저장한다.
+        self.settings_manager.save(
+            settings
+        )
+
         self.current_alarm_settings = settings
 
-        self.set_status("설정이 저장되었습니다.")
+        # Hardware Process가 이미 실행 중이면
+        # 같은 값을 IPC로 보내 Runtime에도 즉시 반영한다.
+        #
+        # Hardware Process가 아직 실행되지 않았다면
+        # send_hardware_command()는 False를 반환할 뿐
+        # CameraWorker를 새로 실행하지 않는다.
+        #
+        # 이후 Hardware Process가 시작될 때
+        # alarm_settings.json을 읽으므로 저장값은 정상 적용된다.
+        self.send_hardware_command(
+            {
+                "type": "UPDATE_ALARM_SETTINGS",
+                "settings": settings.to_dict(),
+            }
+        )
+
+        self.set_status(
+            "설정이 저장되었습니다."
+        )
+
+        # 절대 여기서 ensure_camera_worker() 호출하지 않기
+        # 설정 저장만 했는데 카메라가 켜지는 원인이 됨
+
+        QMessageBox.information(
+            self,
+            "설정 저장",
+            "알림 설정이 저장되었습니다."
+        )
 
         # 절대 여기서 ensure_camera_worker() 호출하지 않기
         # 설정 저장만 했는데 카메라가 켜지는 원인이 됨
