@@ -23,6 +23,27 @@ TOF_MAX_RANGE_M = 2.0
 TOF_FILTER_ALPHA = 0.25
 TOF_IO_TIMEOUT_SEC = 0.20
 
+# ============================================================
+# Passive Buzzer - Raspberry Pi 5
+# ============================================================
+# 수동부저는 Raspberry Pi GPIO에서 PWM을 만들어 구동한다.
+#
+# 실제 배선:
+# - BCM18 / Physical Pin 12 -> NPN Base 구동 회로
+# - GPIO가 부저를 직접 구동하지 않는다.
+# - GPIO18 PWM -> NPN ON/OFF -> Buzzer
+#
+# 주의:
+# - 현재 부저의 DC 저항이 약 15 ohm으로 측정되었으므로
+#   Raspberry Pi GPIO에 부저를 직접 연결하지 않는다.
+BUZZER_BCM_PIN = 18
+
+# 수동부저 고정 음 주파수
+BUZZER_FREQUENCY_HZ = 2000
+
+# PWM Duty Cycle
+BUZZER_DUTY_CYCLE = 0.50
+
 
 # ============================================================
 # ADXL345 IMU - Direct X/Y Control
