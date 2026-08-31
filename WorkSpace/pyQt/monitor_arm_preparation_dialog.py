@@ -19,6 +19,7 @@ from PyQt5.QtWidgets import (
     QProgressBar,
     QSlider,
     QSpinBox,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -55,7 +56,7 @@ class ArmPreparationCanvas(QWidget):
         self.current = None
         self.target = None
         self.user_x_m = None
-        self.setMinimumSize(500, 430)
+        self.setMinimumSize(260, 210)
 
     def set_state(self, preparation, user_x_m):
         current = preparation.get("current_angles_deg", {})
@@ -142,7 +143,7 @@ class ArmPreparationCanvas(QWidget):
 class MonitorArmPreparationDialog(QDialog):
     preparation_finished = pyqtSignal(bool, str)
 
-    def __init__(self, send_command, get_hardware_state, parent=None):
+    def __init__(self, send_command, get_hardware_state, parent=None, manual_only=False):
         super().__init__(parent)
         self.send_command = send_command
         self.get_hardware_state = get_hardware_state
@@ -155,6 +156,7 @@ class MonitorArmPreparationDialog(QDialog):
         self._jog_direction = 0
         self._latest_preparation = {}
         self._latest_calibration = {}
+        self.manual_only = bool(manual_only)
 
         cartesian = self.settings.get("manual_cartesian", {})
         distance = self.settings.get("distance", {})
@@ -167,8 +169,14 @@ class MonitorArmPreparationDialog(QDialog):
         self.applied_distance_cm = self.distance_cm
         self.applied_height_cm = self.default_z_cm
 
-        self.setWindowTitle("POCO 모니터암 초기 준비 — Motor 1~4 / IK / 센서 기준값")
-        self.resize(1220, 780)
+        self.setWindowTitle(
+            "POCO 모니터암 수동조작"
+            if self.manual_only else
+            "POCO 모니터암 초기 준비"
+        )
+        self.resize(780, 440)
+        self.setMinimumSize(720, 400)
+        self.setMaximumSize(800, 470)
         self.setModal(False)
         self._build_ui()
 
@@ -182,9 +190,24 @@ class MonitorArmPreparationDialog(QDialog):
         self.jog_timer.timeout.connect(self._send_jog_step)
 
     def _build_ui(self):
-        outer = QHBoxLayout(self)
-        controls = QVBoxLayout()
-        outer.addLayout(controls, 3)
+        self.setStyleSheet(
+            "QGroupBox{font-weight:600;margin-top:6px;}"
+            "QGroupBox::title{subcontrol-origin:margin;left:8px;}"
+            "QPushButton{min-height:28px;} QLabel{font-size:12px;}"
+        )
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(8, 8, 8, 8)
+        outer.setSpacing(5)
+        tabs = QTabWidget()
+        preparation_tab = QWidget()
+        preparation_controls = QVBoxLayout(preparation_tab)
+        manual_tab = QWidget()
+        manual_layout = QHBoxLayout(manual_tab)
+        manual_controls = QVBoxLayout()
+        manual_layout.addLayout(manual_controls, 5)
+        tabs.addTab(preparation_tab, "자세 전환 · 센서")
+        tabs.addTab(manual_tab, "모터 수동조작")
+        outer.addWidget(tabs, 1)
 
         connection = QGroupBox("1. 모터 1~4 연결 및 작업 시작 위치")
         connection_layout = QGridLayout(connection)
@@ -206,7 +229,7 @@ class MonitorArmPreparationDialog(QDialog):
         connection_layout.addWidget(self.working_button, 0, 1)
         connection_layout.addWidget(self.rest_button, 0, 2)
         connection_layout.addWidget(self.connection_label, 1, 0, 1, 3)
-        controls.addWidget(connection)
+        preparation_controls.addWidget(connection)
 
         ik_group = QGroupBox("2. Servo 1·2 — 사용자 X 게이지 기반 수동 IK")
         ik_layout = QGridLayout(ik_group)
@@ -245,7 +268,7 @@ class MonitorArmPreparationDialog(QDialog):
         self.ik_label = QLabel("현재/목표 IK: --")
         self.ik_label.setWordWrap(True)
         ik_layout.addWidget(self.ik_label, 3, 0, 1, 3)
-        controls.addWidget(ik_group)
+        manual_controls.addWidget(ik_group)
 
         gimbal = QGroupBox("3. Servo 3·4 조그 — 버튼을 누르는 동안만 이동")
         gimbal_layout = QGridLayout(gimbal)
@@ -278,7 +301,7 @@ class MonitorArmPreparationDialog(QDialog):
             gimbal_layout.addWidget(label, row, 0)
             gimbal_layout.addWidget(minus, row, 1)
             gimbal_layout.addWidget(plus, row, 2)
-        controls.addWidget(gimbal)
+        manual_controls.addWidget(gimbal)
 
         sensor = QGroupBox("4. ToF + MediaPipe 눈 간격 기준값 저장")
         sensor_layout = QGridLayout(sensor)
@@ -296,13 +319,13 @@ class MonitorArmPreparationDialog(QDialog):
         sensor_layout.addWidget(self.capture_button, 1, 0)
         sensor_layout.addWidget(self.capture_progress, 1, 1)
         sensor_layout.addWidget(self.capture_result_label, 2, 0, 1, 2)
-        controls.addWidget(sensor)
+        preparation_controls.addWidget(sensor)
+        preparation_controls.addStretch(1)
 
         self.status_label = QLabel("먼저 모터 1~4 연결 확인을 눌러주세요.")
         self.status_label.setWordWrap(True)
         self.status_label.setStyleSheet("color:#b53a2d; font-weight:600;")
-        controls.addWidget(self.status_label)
-        controls.addStretch(1)
+        outer.addWidget(self.status_label)
 
         bottom = QHBoxLayout()
         self.finish_button = QPushButton("준비 완료 후 종료")
@@ -310,14 +333,18 @@ class MonitorArmPreparationDialog(QDialog):
         self.finish_button.clicked.connect(
             lambda: self._send({"type": "FINISH_MONITOR_ARM_PREPARATION"})
         )
-        cancel = QPushButton("취소")
+        cancel = QPushButton("닫기" if self.manual_only else "취소")
         cancel.clicked.connect(self.cancel_preparation)
         bottom.addWidget(self.finish_button)
         bottom.addWidget(cancel)
-        controls.addLayout(bottom)
+        outer.addLayout(bottom)
 
         self.canvas = ArmPreparationCanvas(self.kinematics)
-        outer.addWidget(self.canvas, 4)
+        manual_layout.addWidget(self.canvas, 4)
+        if self.manual_only:
+            sensor.hide()
+            self.finish_button.hide()
+            tabs.setCurrentIndex(1)
         self._update_user_label()
 
     def _send(self, message):

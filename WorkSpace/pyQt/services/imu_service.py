@@ -482,6 +482,49 @@ class ADXL345IMUService:
         self.motor4_imu_x_pid.reset()
         self.last_update_time = None
 
+    def restore_calibration(self, record):
+        """Restore a previously saved user reference for this process session."""
+        if not self.available:
+            raise RuntimeError("IMU가 연결되지 않아 프로필을 적용할 수 없습니다.")
+        record = record if isinstance(record, dict) else {}
+        required = {
+            "imu_x_reference_g": "x_reference_g",
+            "imu_y_reference_g": "y_reference_g",
+            "imu_x_reference_raw": "x_reference_raw",
+            "imu_y_reference_raw": "y_reference_raw",
+            "pitch_reference_deg": "pitch_reference_deg",
+            "roll_reference_deg": "roll_reference_deg",
+        }
+        values = {}
+        for attribute, key in required.items():
+            if record.get(key) is None:
+                raise ValueError(f"IMU 프로필 값이 없습니다: {key}")
+            values[attribute] = float(record[key])
+        self.calibrating = False
+        self.calibrated_session = True
+        self.calibration_started_at = None
+        for attribute, value in values.items():
+            setattr(self, attribute, value)
+        self.motor3_imu_y_pid.reset()
+        self.motor4_imu_x_pid.reset()
+        self.last_update_time = None
+        self._pending_calibration_result = None
+        state = dict(self.latest_state) if isinstance(self.latest_state, dict) else self._empty_state()
+        state.update({
+            "available": True,
+            "calibrating": False,
+            "calibrated": True,
+            "imu_x_reference_g": self.imu_x_reference_g,
+            "imu_y_reference_g": self.imu_y_reference_g,
+            "imu_x_reference_raw": self.imu_x_reference_raw,
+            "imu_y_reference_raw": self.imu_y_reference_raw,
+            "pitch_reference_deg": self.pitch_reference_deg,
+            "roll_reference_deg": self.roll_reference_deg,
+            "timestamp": time.time(),
+        })
+        self.latest_state = state
+        return dict(state)
+
     def start_calibration(self):
         if not self.available:
             return False

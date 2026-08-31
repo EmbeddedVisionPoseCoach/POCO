@@ -299,6 +299,33 @@ class Motor34Controller:
             return int(self.auto_speed)
         return max(1, min(int(self.auto_speed), int(axis.max_speed)))
 
+    def move_to_neutral(self, motor_angles_deg):
+        """Move both gimbal axes to the sensor-calibrated neutral angles."""
+        if not self.ready:
+            return {"accepted": False, "error": "Motor3/4가 준비되지 않았습니다."}
+        values = dict(motor_angles_deg or {})
+        targets = {}
+        for axis in (self.motor3, self.motor4):
+            value = values.get(axis.joint)
+            if value is None:
+                return {"accepted": False, "error": f"중립각이 없습니다: {axis.joint}"}
+            target = float(value)
+            if not float(axis.safe_min_deg) <= target <= float(axis.safe_max_deg):
+                return {"accepted": False, "error": f"{axis.joint} 중립각이 안전범위 밖입니다."}
+            targets[axis.joint] = target
+        speed = min(self._fixed_servo_speed(self.motor3), self._fixed_servo_speed(self.motor4))
+        success = self.motor.move_joints(
+            targets, speed=speed, acc=int(self.auto_acc), wait=False
+        )
+        if success:
+            for axis in (self.motor3, self.motor4):
+                axis.target_angle_deg = targets[axis.joint]
+                axis.last_command_angle_deg = targets[axis.joint]
+            self.last_error = None
+        else:
+            self.last_error = self.motor.last_error or "Motor3/4 중립 이동 실패"
+        return {"accepted": bool(success), "targets": targets, "error": self.last_error}
+
     def _control_axis(self, axis, pid_output_deg_s, now):
         if not axis.config_enabled:
             return True

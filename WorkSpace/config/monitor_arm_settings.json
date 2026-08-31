@@ -75,6 +75,12 @@
     "default_monitor_z_m": 0.2560722511328793
   },
   "safety": {
+    "presence_min_m": 0.3,
+    "presence_max_m": 1.5,
+    "absence_timeout_sec": 5.0,
+    "reacquire_stable_sec": 1.0,
+    "posture_confidence_min": 0.7,
+    "posture_stale_sec": 1.0,
     "soft_joint_limits_deg": {
       "shoulder_lift": {
         "min": -80.0,

@@ -16,6 +16,8 @@ from services.monitor_arm_calibration_service import (
 from services.monitor_arm_preparation_controller import (
     MonitorArmPreparationController,
 )
+from services.monitor_arm_kinematics import JointCommand
+from services.monitor_arm_safety_supervisor import MonitorArmSafetySupervisor
 from services.monitor_arm_user_x import (
     EyeGapVisionDistanceEstimator,
     ToFUserXSource,
@@ -67,7 +69,12 @@ def _extract_pose_landmark_state(pose_state):
         return None, None, False
 
     frame_id = pose_state.get("frame_id")
-    valid = bool(pose_state.get("landmark_valid", False))
+    valid = bool(
+        pose_state.get(
+            "control_landmark_valid",
+            pose_state.get("landmark_valid", False),
+        )
+    )
     landmarks = pose_state.get("landmarks") if valid else None
     return frame_id, landmarks, valid
 
@@ -247,6 +254,21 @@ def run_hardware_process(
         motor34,
         settings_path=MONITOR_ARM_SETTINGS_FILE,
     )
+    safety_cfg = monitor_arm_settings.get("safety", {})
+    safety_supervisor = MonitorArmSafetySupervisor(
+        absence_timeout_sec=safety_cfg.get("absence_timeout_sec", 5.0),
+        reacquire_stable_sec=safety_cfg.get("reacquire_stable_sec", 1.0),
+        posture_confidence=safety_cfg.get("posture_confidence_min", 0.7),
+        posture_stale_sec=safety_cfg.get("posture_stale_sec", 1.0),
+    )
+    presence_min_m = float(safety_cfg.get("presence_min_m", 0.30))
+    presence_max_m = float(safety_cfg.get("presence_max_m", 1.50))
+    active_profile_motor_angles = {}
+    latest_safety_state = safety_supervisor.snapshot()
+    stop_rest_pending = False
+    stop_rest_started_at = None
+    stop_rest_last_check_at = 0.0
+    stop_rest_targets = {}
 
     # JSON에는 사용자가 바꿀 튜닝값만 있다.
     imu.apply_control_config(control["imu"], control["pid"])
@@ -501,6 +523,76 @@ def run_hardware_process(
                         success=True,
                         message="모니터암 초기 준비 창을 시작했습니다.",
                     )
+                    continue
+
+                if event_type == "APPLY_USER_PROFILE":
+                    try:
+                        profile = dict(event.get("profile") or {})
+                        calibration_state = monitor_arm_calibration.restore(
+                            profile.get("calibration") or {}
+                        )
+                        latest_imu_state = imu.restore_calibration(profile.get("imu") or {})
+                        active_profile_motor_angles = dict(
+                            profile.get("motor_angles_deg")
+                            or calibration_state.get("motor_angles_deg")
+                            or {}
+                        )
+                        vision_estimator.calibrate(
+                            calibration_state["eye_gap_baseline_px"],
+                            calibration_state["user_monitor_distance_baseline_m"],
+                        )
+                        workflow_state = HW_READY_FOR_POSE_CALIBRATION
+                        safety_supervisor.reset()
+                        _put_hardware_event(
+                            hw_to_main_event_queue,
+                            "USER_PROFILE_APPLIED",
+                            success=True,
+                            message="사용자 프로필의 비전·ToF·IMU·모터 기준값을 적용했습니다.",
+                            slot=event.get("slot"),
+                        )
+                    except Exception as error:
+                        _put_hardware_event(
+                            hw_to_main_event_queue,
+                            "USER_PROFILE_APPLIED",
+                            success=False,
+                            message=f"사용자 프로필 적용 실패: {error}",
+                            slot=event.get("slot"),
+                        )
+                    continue
+
+                if event_type == "MEASUREMENT_STOP_AND_REST":
+                    result12 = motor12.move_to_rest()
+                    neutral = active_profile_motor_angles or dict(
+                        monitor_arm_calibration.snapshot().get("motor_angles_deg") or {}
+                    )
+                    result34 = motor34.move_to_neutral(neutral)
+                    success = bool(result12.get("accepted") and result34.get("accepted"))
+                    safety_supervisor.reset()
+                    if success:
+                        stop_rest_pending = True
+                        stop_rest_started_at = time.monotonic()
+                        stop_rest_last_check_at = 0.0
+                        stop_rest_targets = {
+                            "shoulder_lift": float(motor12.rest_command.shoulder_lift_deg),
+                            "elbow_flex": float(motor12.rest_command.elbow_flex_deg),
+                            "wrist_flex": float(neutral["wrist_flex"]),
+                            "wrist_roll": float(neutral["wrist_roll"]),
+                        }
+                        _put_hardware_event(
+                            hw_to_main_event_queue,
+                            "MEASUREMENT_STOP_AND_REST_STARTED",
+                            success=True,
+                            message="종료 자세 이동을 시작했습니다.",
+                        )
+                    else:
+                        _put_hardware_event(
+                            hw_to_main_event_queue,
+                            "MEASUREMENT_STOP_AND_REST_ACK",
+                            success=False,
+                            message=f"종료 자세 이동 일부 실패: M1/2={result12} / M3/4={result34}",
+                            motor12=result12,
+                            motor34=result34,
+                        )
                     continue
 
                 if event_type == "MONITOR_ARM_CONNECT_ALL":
@@ -1297,11 +1389,94 @@ def run_hardware_process(
                 "timestamp": time.time(),
             }
 
+            raw_tof_distance = latest_tof_state.get("filtered_distance_m")
+            tof_presence_valid = False
+            if latest_tof_state.get("valid", False) and raw_tof_distance is not None:
+                try:
+                    raw_tof_distance = float(raw_tof_distance)
+                    tof_presence_valid = presence_min_m < raw_tof_distance < presence_max_m
+                except (TypeError, ValueError):
+                    tof_presence_valid = False
+            pose_inference = (
+                latest_pose_state.get("inference")
+                if isinstance(latest_pose_state, dict)
+                else None
+            )
+            if main_mode == "MEASURING" and not stop_rest_pending:
+                latest_safety_state = safety_supervisor.update(
+                    tof_presence_valid,
+                    latest_pose_landmark_valid,
+                    pose_inference,
+                    now=now,
+                )
+                if latest_safety_state.get("request_return", False):
+                    angles = active_profile_motor_angles or dict(
+                        monitor_arm_calibration.snapshot().get("motor_angles_deg") or {}
+                    )
+                    try:
+                        target = JointCommand(
+                            float(angles["shoulder_lift"]),
+                            float(angles["elbow_flex"]),
+                        )
+                        return12 = motor12.move_to_working_smooth(target)
+                    except Exception as error:
+                        return12 = {"accepted": False, "error": str(error)}
+                    return34 = motor34.move_to_neutral(angles)
+                    _put_hardware_event(
+                        hw_to_main_event_queue,
+                        "USER_ABSENT_RETURN_REQUESTED",
+                        success=bool(return12.get("accepted") and return34.get("accepted")),
+                        message="사용자 미검출 5초 지속: 작업 초기자세와 짐벌 중립각으로 복귀합니다.",
+                        motor12=return12,
+                        motor34=return34,
+                    )
+            else:
+                safety_supervisor.reset()
+                latest_safety_state = safety_supervisor.snapshot(now)
+            latest_safety_state["tof_presence_valid"] = tof_presence_valid
+            latest_safety_state["landmark_presence_valid"] = latest_pose_landmark_valid
+            latest_safety_state["tof_alert"] = (
+                None
+                if tof_presence_valid
+                else f"ToF 거리 미검출/범위 이탈 ({presence_min_m:.2f}~{presence_max_m:.2f}m 필요)"
+            )
+
             # ==================================================
             # F. Motor control context
             # ==================================================
             imu_ready = bool(imu.available and imu.calibrated and not imu.calibrating)
             latest_preparation_state = monitor_arm_preparation.update(now)
+
+            # 종료 버튼은 네 모터가 목표에 실제 도착한 뒤에만 카메라 종료 ACK를 보낸다.
+            if stop_rest_pending and now - stop_rest_last_check_at >= 0.20:
+                stop_rest_last_check_at = now
+                actual = {
+                    joint: motor_service.get_joint_angle(joint)
+                    for joint in stop_rest_targets
+                }
+                reached = all(
+                    actual[joint] is not None
+                    and abs(float(actual[joint]) - target) <= 2.0
+                    for joint, target in stop_rest_targets.items()
+                )
+                timed_out = bool(
+                    stop_rest_started_at is not None
+                    and now - stop_rest_started_at >= 12.0
+                )
+                if reached or timed_out:
+                    stop_rest_pending = False
+                    _put_hardware_event(
+                        hw_to_main_event_queue,
+                        "MEASUREMENT_STOP_AND_REST_ACK",
+                        success=reached,
+                        message=(
+                            "모터 1·2 휴식자세 및 모터 3·4 센서 중립각 복귀를 완료했습니다."
+                            if reached else
+                            "종료 자세 도착 확인 시간이 초과되었습니다. 모터 상태를 확인해주세요."
+                        ),
+                        actual_angles_deg=actual,
+                        target_angles_deg=dict(stop_rest_targets),
+                    )
             preparation_active = bool(
                 latest_preparation_state.get("active", False)
             )
@@ -1326,11 +1501,15 @@ def run_hardware_process(
             # 일반 ToF/Vision 자동추종은 실제 자세 측정(MEASURING) 중에만 켜서
             # 카메라/Process 초기화 직후 팔이 예기치 않게 움직이지 않게 한다.
             motor12_requested = bool(
+                not stop_rest_pending
+                and (
                 preparation_recovery
                 or (
                     not preparation_active
                     and main_mode == "MEASURING"
                     and latest_monitor_arm_input_state.get("valid", False)
+                    and latest_safety_state.get("tracking_allowed", False)
+                )
                 )
             )
 
@@ -1340,8 +1519,14 @@ def run_hardware_process(
             )
 
             motor34_requested = bool(
+                not stop_rest_pending
+                and
                 not preparation_active
                 and main_mode in ("CALIBRATING", "MEASURING")
+                and (
+                    main_mode != "MEASURING"
+                    or latest_safety_state.get("tracking_allowed", False)
+                )
             )
 
             motor34_active = bool(
@@ -1569,6 +1754,7 @@ def run_hardware_process(
                             monitor_arm_calibration.session_ready
                             and latest_monitor_arm_input_state.get("valid", False)
                         ),
+                        "safety": dict(latest_safety_state),
                     },
                     "motor": latest_motor_state,
 

@@ -44,6 +44,8 @@ PROFILE_INTERVAL_SEC = 2.0
 LEFT_EYE_INDEX = 2
 RIGHT_EYE_INDEX = 5
 MINIMUM_EYE_GAP_PX = 5.0
+CONTROL_LANDMARK_INDICES = (2, 5, 11, 12, 23, 24)
+CONTROL_LANDMARK_MIN_VISIBILITY = 0.60
 
 
 class ProcessProfiler:
@@ -163,6 +165,17 @@ def serialize_pose_landmarks(results):
     ]
 
 
+def pose_control_landmark_quality(results):
+    """Return minimum visibility for eyes/shoulders/hips used by arm control."""
+    if results is None or not results.pose_landmarks:
+        return 0.0, False
+    landmarks = results.pose_landmarks.landmark
+    if len(landmarks) <= max(CONTROL_LANDMARK_INDICES):
+        return 0.0, False
+    quality = min(float(landmarks[index].visibility) for index in CONTROL_LANDMARK_INDICES)
+    return quality, bool(math.isfinite(quality) and quality >= CONTROL_LANDMARK_MIN_VISIBILITY)
+
+
 def measure_pose_eye_gap_px(results, frame_width, frame_height):
     """MediaPipe Pose 2·5번 눈 landmark의 2D pixel 간격을 반환한다."""
     if results is None or not results.pose_landmarks:
@@ -211,6 +224,7 @@ def run_pose_process(
     calibration_emit_time = 0.0
     latest_hardware_state = None
     latest_hardware_event = None
+    latest_pose_inference = None
     profiler = ProcessProfiler("POSE")
 
     try:
@@ -259,6 +273,7 @@ def run_pose_process(
                 command = command_queue.get_nowait()
 
                 if command == "START_CALIBRATION":
+                    latest_pose_inference = None
                     gru_service.stop()
                     calibration_result = calibration_service.start()
                     mode = MODE_CALIBRATING
@@ -280,6 +295,7 @@ def run_pose_process(
                     print("[PoseProcess:PROFILE] Calibration 시작")
 
                 elif command == "START_PREPARATION":
+                    latest_pose_inference = None
                     calibration_service.cancel()
                     gru_service.stop()
                     mode = MODE_PREPARING
@@ -299,6 +315,7 @@ def run_pose_process(
                     print("[PoseProcess:PROFILE] Monitor-arm preparation 시작")
 
                 elif command in ("START", "START_MEASUREMENT"):
+                    latest_pose_inference = None
                     calibration_service.cancel()
 
                     try:
@@ -337,6 +354,7 @@ def run_pose_process(
                         print(f"[PoseProcess:PROFILE] 측정 시작 실패: {e}")
 
                 elif command == "STOP":
+                    latest_pose_inference = None
                     mode = MODE_IDLE
                     calibration_service.cancel()
                     gru_service.stop()
@@ -401,6 +419,7 @@ def run_pose_process(
             feature_start = time.perf_counter_ns()
             features = build_pose_features(results)
             landmarks = serialize_pose_landmarks(results)
+            landmark_quality, control_landmark_valid = pose_control_landmark_quality(results)
             eye_gap_px = measure_pose_eye_gap_px(
                 results,
                 frame.shape[1],
@@ -417,11 +436,14 @@ def run_pose_process(
                 "timestamp_ns": timestamp_ns,
                 "mode": mode,
                 "landmark_valid": landmarks is not None,
+                "control_landmark_valid": control_landmark_valid,
+                "landmark_quality": landmark_quality,
+                "landmark_min_visibility": CONTROL_LANDMARK_MIN_VISIBILITY,
                 "landmarks": landmarks,
                 "eye_gap_valid": eye_gap_px is not None,
                 "eye_gap_px": eye_gap_px,
                 "features": features.tolist() if features is not None else None,
-                "inference": None,
+                "inference": latest_pose_inference,
                 "calibration": None,
                 "hardware_state": latest_hardware_state,
                 "hardware_event": latest_hardware_event,
@@ -493,12 +515,14 @@ def run_pose_process(
                     }
                     result_queue.put(pose_result)
 
-                    pose_state["inference"] = {
+                    latest_pose_inference = {
                         "posture_type": gru_result["posture_type"],
                         "confidence": gru_result["confidence"],
                         "pose_index": gru_result["pose_index"],
                         "latency_ms": total_latency_ms,
+                        "timestamp": time.time(),
                     }
+                    pose_state["inference"] = latest_pose_inference
 
             # State는 항상 최신값 하나만 유지한다.
             put_latest(state_to_main_queue, pose_state)

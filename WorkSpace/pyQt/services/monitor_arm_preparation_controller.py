@@ -165,9 +165,11 @@ class MonitorArmPreparationController:
                 self.working_start_max_error_deg = error
                 if (
                     not self.recovery_active
-                    and self.target_reason in {"manual_ik", "rest"}
+                    and self.target_reason in {"manual_ik", "rest", "working_start"}
                     and error <= self.arrival_tolerance_deg
                 ):
+                    if self.target_reason == "working_start":
+                        self.working_start_completed = True
                     self.target_reason = None
                     self.movement_status = "completed"
             if self.movement_status == "telemetry_error":
@@ -205,7 +207,7 @@ class MonitorArmPreparationController:
         target = self.kinematics.inverse(requested_pose.x_m, requested_pose.z_m)
         self._validate_final_target(target)
         self.motor12.planner.working_command = target
-        result = self.motor12.resume_from_rest()
+        result = self.motor12.move_to_working_smooth(target)
         if not result.get("accepted", False):
             if self._normal_working_command is not None:
                 self.motor12.planner.working_command = self._normal_working_command
@@ -213,12 +215,12 @@ class MonitorArmPreparationController:
         self.target = target
         self.target_pose = self.kinematics.forward(target)
         self.target_reason = "working_start"
-        self.recovery_active = True
+        self.recovery_active = False
         self.working_start_completed = False
         self.last_error = None
         self.movement_status = "moving"
         self.working_start_max_error_deg = None
-        self.motor12_hold_reason = "RECOVERY"
+        self.motor12_hold_reason = "WORKING_SMOOTH"
         self.motor12_last_error = None
         return target
 

@@ -12,7 +12,7 @@ import webbrowser
 from PyQt5 import uic
 from PyQt5.QtCore import Qt, QTimer, QCoreApplication, QEventLoop
 from PyQt5.QtGui import QPixmap
-from PyQt5.QtWidgets import QApplication, QMainWindow, QMessageBox
+from PyQt5.QtWidgets import QApplication, QMainWindow, QMessageBox, QPushButton
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 sys.path.append(str(ROOT_DIR))
@@ -20,10 +20,12 @@ sys.path.append(str(ROOT_DIR))
 import modules.config as config
 from camera_worker_profile_all import CameraWorker
 from monitor_arm_preparation_dialog import MonitorArmPreparationDialog
+from user_profile_dialog import UserProfileDialog
 from managers.vision_process_manager_profile import PROFILE_MODE
 from modules.app_settings import SettingsManager, AlarmSettings
 from services.hardware_config_service import HardwareConfigService
 from services.hardware_state_store import get_hardware_runtime_state_store
+from services.user_profile_service import UserProfileService
 
 import warnings
 
@@ -80,6 +82,11 @@ class MainWindow(QMainWindow):
         self.latest_hardware_event = None
         self.monitor_arm_preparation_dialog = None
         self.monitor_arm_preparation_ready = False
+        self.user_profile_service = UserProfileService()
+        self.active_profile_slot = None
+        self._pending_profile_slot = None
+        self._measurement_stop_pending = False
+        self._last_safety_message = None
 
         self.current_alarm_settings = None
 
@@ -87,6 +94,14 @@ class MainWindow(QMainWindow):
         self.btnCalibrationStart.clicked.connect(self.on_calibration_start_clicked)
         self.btnCamOn.clicked.connect(self.on_camera_on_clicked)
         self.btnCamOff.clicked.connect(self.on_camera_off_clicked)
+
+        self.btnUserProfile = QPushButton("프로필", self)
+        self.btnManualArm = QPushButton("수동조작", self)
+        self.btnUserProfile.clicked.connect(self.on_user_profile_clicked)
+        self.btnManualArm.clicked.connect(self.on_manual_arm_clicked)
+        if hasattr(self, "headerLayout"):
+            self.headerLayout.addWidget(self.btnUserProfile)
+            self.headerLayout.addWidget(self.btnManualArm)
 
         if hasattr(self, "btnReport"):
             self.btnReport.clicked.connect(self.on_report_clicked)
@@ -121,10 +136,11 @@ class MainWindow(QMainWindow):
         self.btnCalibrationStart.setEnabled(False)
         self.btnCamOff.setEnabled(False)
 
-        self.btnCamOn.setEnabled(self.has_baseline())
-
-        if self.has_baseline():
-            self.set_status("자세 측정을 시작할 수 있습니다.")
+        # 디스크의 전역 baseline만으로 이전 사용자를 암묵적으로 선택하지 않는다.
+        # 이번 실행에서 보정을 마치거나 프로필을 명시적으로 불러온 뒤 활성화한다.
+        self.btnCamOn.setEnabled(False)
+        if any(item.get("occupied") for item in self.user_profile_service.list_profiles()):
+            self.set_status("사용자 프로필을 선택하거나 새 보정을 진행해주세요.")
         else:
             self.set_status("초기값 설정을 먼저 진행해주세요.")
 
@@ -235,6 +251,12 @@ class MainWindow(QMainWindow):
             return
         self.latest_hardware_state = state
         self.hardware_state_store.update(state)
+        safety = state.get("monitor_arm", {}).get("safety", {}) if isinstance(state, dict) else {}
+        if str(state.get("main_mode", "")).upper() == "MEASURING" and safety:
+            message = safety.get("tof_alert") or safety.get("reason")
+            if message and message != self._last_safety_message:
+                self._last_safety_message = message
+                self.set_status(str(message))
 
     def on_hardware_event_changed(self, event):
         """Hardware Process -> Main 순서 보장 Event/ACK 수신 지점."""
@@ -258,6 +280,19 @@ class MainWindow(QMainWindow):
                 config_data = event.get("config")
                 if isinstance(config_data, dict):
                     self.latest_hardware_config = config_data
+            if event_type == "USER_PROFILE_APPLIED":
+                if event.get("success"):
+                    self.active_profile_slot = self._pending_profile_slot
+                    self.monitor_arm_preparation_ready = True
+                    self.btnCamOn.setEnabled(True)
+                    self.set_status("프로필 적용 완료. 측정 시작 버튼을 눌러주세요.")
+                else:
+                    QMessageBox.warning(self, "프로필 적용 실패", str(event.get("message", "")))
+                self._pending_profile_slot = None
+            elif event_type == "MEASUREMENT_STOP_AND_REST_ACK" and self._measurement_stop_pending:
+                if event.get("success") is False:
+                    QMessageBox.warning(self, "종료 자세 이동", str(event.get("message", "")))
+                QTimer.singleShot(1500, self._finish_camera_off)
 
     def send_hardware_command(self, message):
         """Main Process -> Hardware Process IPC 전송 지점."""
@@ -332,6 +367,47 @@ class MainWindow(QMainWindow):
     # ---------------------------------------------------------
     # Button Events
     # ---------------------------------------------------------
+    def on_user_profile_clicked(self):
+        dialog = UserProfileDialog(self.user_profile_service, parent=self)
+        if dialog.exec_() != dialog.Accepted:
+            return
+        slot = dialog.selected_slot
+        try:
+            mode = str(PROFILE_MODE).upper()
+            bundle = self.user_profile_service.activate_profile(
+                slot,
+                self.resolve_workspace_path(config.BASELINE_PATH),
+                self.resolve_workspace_path(config.FACE_BASELINE_PATH),
+                mode in ("POSE_ONLY", "BOTH"),
+                mode in ("FACE_ONLY", "BOTH"),
+            )
+            self.ensure_camera_worker()
+            self._pending_profile_slot = slot
+            self.btnCamOn.setEnabled(False)
+            if not self.send_hardware_command({"type": "APPLY_USER_PROFILE", "slot": slot, "profile": bundle}):
+                raise RuntimeError("하드웨어 프로세스에 프로필을 전달하지 못했습니다.")
+            self.set_status("사용자 프로필을 적용하는 중입니다.")
+        except Exception as error:
+            self._pending_profile_slot = None
+            QMessageBox.warning(self, "프로필 불러오기 실패", str(error))
+
+    def on_manual_arm_clicked(self):
+        self.ensure_camera_worker()
+        self.camera_worker.start_monitor_arm_preparation()
+        self.send_hardware_command({"type": "START_MONITOR_ARM_PREPARATION"})
+        dialog = MonitorArmPreparationDialog(
+            self.send_hardware_command, self.get_latest_hardware_state,
+            parent=self, manual_only=True,
+        )
+        self.monitor_arm_preparation_dialog = dialog
+        dialog.preparation_finished.connect(self.on_manual_arm_finished)
+        dialog.show()
+
+    def on_manual_arm_finished(self, _success, _message):
+        if self.camera_worker is not None:
+            self.camera_worker.finish_monitor_arm_preparation()
+        self.monitor_arm_preparation_dialog = None
+
     def on_camera_on_clicked(self):
         """
         Cam On 버튼:
@@ -462,6 +538,8 @@ class MainWindow(QMainWindow):
             self.btnCalibrationStart.setEnabled(False)
             self.btnCamOn.setEnabled(False)
             self.btnCamOff.setEnabled(True)
+            self.btnManualArm.setEnabled(False)
+            self.btnUserProfile.setEnabled(False)
 
             self.initialize_realtime_labels()
             self.set_status(message)
@@ -533,6 +611,20 @@ class MainWindow(QMainWindow):
             dialog.cancel_preparation()
         self.monitor_arm_preparation_dialog = None
         self.monitor_arm_preparation_ready = False
+        if self.camera_worker is not None:
+            self.camera_worker.stop_measurement()
+        self._measurement_stop_pending = True
+        self.btnCamOff.setEnabled(False)
+        self.set_status("모니터암을 종료 자세로 이동하는 중입니다.")
+        if self.send_hardware_command({"type": "MEASUREMENT_STOP_AND_REST"}):
+            QTimer.singleShot(15000, self._finish_camera_off)
+            return
+        self._finish_camera_off()
+
+    def _finish_camera_off(self):
+        if not self._measurement_stop_pending:
+            return
+        self._measurement_stop_pending = False
         self.stop_camera_worker()
 
         self.label.clear()
@@ -543,6 +635,8 @@ class MainWindow(QMainWindow):
         self.btnCalibrationStart.setEnabled(False)
         self.btnCamOn.setEnabled(self.has_baseline())
         self.btnCamOff.setEnabled(False)
+        self.btnManualArm.setEnabled(True)
+        self.btnUserProfile.setEnabled(True)
 
         if self.has_baseline():
             self.set_status("카메라가 종료되었습니다.")
@@ -587,6 +681,15 @@ class MainWindow(QMainWindow):
             self.btnCamOff.setEnabled(True)
 
             self.set_status("초기값 설정이 완료되었습니다.")
+            answer = QMessageBox.question(
+                self,
+                "프로필 저장",
+                "이번 보정 정보를 사용자 프로필로 저장할까요?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes,
+            )
+            if answer == QMessageBox.Yes:
+                self.save_current_profile()
 
         else:
             QMessageBox.warning(
@@ -603,6 +706,26 @@ class MainWindow(QMainWindow):
             self.btnCamOff.setEnabled(True)
 
             self.set_status("초기값 설정이 실패했습니다. 기존 기준값이 있으면 계속 사용할 수 있습니다.")
+
+    def save_current_profile(self):
+        dialog = UserProfileDialog(self.user_profile_service, save_mode=True, parent=self)
+        if dialog.exec_() != dialog.Accepted:
+            return
+        try:
+            mode = str(PROFILE_MODE).upper()
+            metadata = self.user_profile_service.save_profile(
+                dialog.selected_slot,
+                dialog.selected_name,
+                self.resolve_workspace_path(config.BASELINE_PATH),
+                self.resolve_workspace_path(config.FACE_BASELINE_PATH),
+                self.get_latest_hardware_state(),
+                mode in ("POSE_ONLY", "BOTH"),
+                mode in ("FACE_ONLY", "BOTH"),
+            )
+            self.active_profile_slot = dialog.selected_slot
+            QMessageBox.information(self, "프로필 저장 완료", f"'{metadata['name']}' 프로필을 저장했습니다.")
+        except Exception as error:
+            QMessageBox.warning(self, "프로필 저장 실패", str(error))
 
     # ---------------------------------------------------------
     # UI Helper

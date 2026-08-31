@@ -1,3 +1,4 @@
+import math
 import time
 from dataclasses import dataclass
 
@@ -957,6 +958,56 @@ class Motor12Controller:
                 ),
             },
         }
+
+    def move_to_working_smooth(self, target=None):
+        """Validate the recovery path, then send one synchronized servo goal.
+
+        Servo interpolation now performs the whole rest-to-work movement, avoiding
+        the visible 5 Hz / 5 degree stop-and-go recovery commands.
+        """
+        if not (self.available and self.enabled and self.ready and self.planner is not None):
+            return {"accepted": False, "error": "Motor1/2가 준비되지 않았습니다."}
+        target = target or self.planner.working_command
+        try:
+            current = self._read_current_angles()
+            # Reuse the planner's validated recovery steps without sending them.
+            probe = current
+            largest = max(
+                abs(target.shoulder_lift_deg - probe.shoulder_lift_deg),
+                abs(target.elbow_flex_deg - probe.elbow_flex_deg),
+            )
+            steps = max(1, int(math.ceil(largest / self.planner.limits.max_joint_step_deg)))
+            for index in range(1, steps + 1):
+                next_step = current.interpolate(target, index / steps)
+                self.planner._validate_recovery_step(
+                    probe, next_step, self._calibration_ranges()
+                )
+                probe = next_step
+            speed, acc = self._rest_speed_acc()
+            targets = {
+                MOTOR1_JOINT: float(target.shoulder_lift_deg),
+                MOTOR2_JOINT: float(target.elbow_flex_deg),
+            }
+            ranges = self._calibration_ranges()
+            needs_special = any(
+                not ranges[joint][0] <= angle <= ranges[joint][1]
+                for joint, angle in targets.items()
+            )
+            mover = self.motor.move_joints_special if needs_special else self.motor.move_joints
+            success = mover(targets, speed=speed, acc=acc, wait=False)
+            if not success:
+                raise RuntimeError(self.motor.last_error or "작업자세 동기 이동 실패")
+            self.rest_mode = False
+            self.planner.cancel_working_pose_recovery()
+            self.last_target = target
+            self.hold_reason = "WORKING_SMOOTH"
+            self.last_success = True
+            return {"accepted": True, "target": targets, "speed": speed, "acc": acc}
+        except Exception as error:
+            self.last_error = str(error)
+            self.last_success = False
+            return {"accepted": False, "error": str(error)}
+
 
     def update(self, context):
         """융합 user X를 이용해 Motor1/2 자동추종/Recovery를 수행한다.

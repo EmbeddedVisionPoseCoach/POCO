@@ -101,6 +101,29 @@ class MonitorArmPreparationCalibrationService:
         self.record = self._empty_record()
         return self.snapshot()
 
+    def restore(self, record: dict[str, Any]) -> dict[str, Any]:
+        """Activate a saved profile calibration for the current session."""
+        record = dict(record or {})
+        required = (
+            "tof_user_x_baseline_m",
+            "eye_gap_baseline_px",
+            "monitor_x_baseline_m",
+        )
+        if not record.get("ready", False) or any(record.get(key) is None for key in required):
+            raise ValueError("저장된 모니터암 센서 보정값이 완전하지 않습니다.")
+        self.running = False
+        self.started_at = None
+        self.tof_samples_m.clear()
+        self.eye_gap_samples_px.clear()
+        self.session_ready = True
+        record["ready"] = True
+        record["session_ready"] = True
+        record["running"] = False
+        record["remain_sec"] = 0.0
+        record["path"] = str(self.path)
+        self.record = record
+        return self.snapshot()
+
     def add_tof_state(self, tof_state: dict[str, Any] | None) -> bool:
         if not self.running or not isinstance(tof_state, dict):
             return False
