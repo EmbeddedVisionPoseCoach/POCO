@@ -7,6 +7,12 @@ from modules.config import FRAME_HEIGHT, FRAME_WIDTH
 from ipc.queue_utils import drain_ordered, get_latest, put_latest, put_ordered
 from services.hardware_config_service import HardwareConfigService
 from services.imu_service import ADXL345IMUService
+from services.monitor_arm_calibration_service import (
+    MonitorArmPreparationCalibrationService,
+)
+from services.monitor_arm_preparation_controller import (
+    MonitorArmPreparationController,
+)
 from services.monitor_arm_user_x import (
     EyeGapVisionDistanceEstimator,
     ToFUserXSource,
@@ -28,6 +34,7 @@ MONITOR_ARM_SETTINGS_FILE = WORKSPACE_DIR / "config" / "monitor_arm_settings.jso
 HW_IDLE = "IDLE"
 HW_IMU_OFFSET_CALIBRATING = "IMU_OFFSET_CALIBRATING"
 HW_READY_FOR_POSE_CALIBRATION = "READY_FOR_POSE_CALIBRATION"
+HW_MONITOR_ARM_PREPARING = "MONITOR_ARM_PREPARING"
 HW_POSE_CALIBRATING = "POSE_CALIBRATING"
 HW_MEASURING = "MEASURING"
 
@@ -202,6 +209,12 @@ def run_hardware_process(
         settings=monitor_arm_settings,
     )
     motor34 = Motor34Controller(motor_service)
+    monitor_arm_preparation = MonitorArmPreparationController(
+        motor_service,
+        motor12,
+        motor34,
+        settings_path=MONITOR_ARM_SETTINGS_FILE,
+    )
 
     # JSON에는 사용자가 바꿀 튜닝값만 있다.
     imu.apply_control_config(control["imu"], control["pid"])
@@ -274,6 +287,16 @@ def run_hardware_process(
     last_vision_pose_frame_id = None
     latest_vision_user_x_m = None
     latest_eye_gap_px = None
+
+    monitor_arm_calibration = MonitorArmPreparationCalibrationService(
+        duration_sec=5.0,
+        minimum_tof_samples=max(
+            1,
+            int(5.0 * float(tof_cfg.get("sample_hz", 20.0)) * 0.6),
+        ),
+        minimum_eye_samples=30,
+    )
+    latest_preparation_state = monitor_arm_preparation.snapshot()
 
     # ========================================================
     # 3. Calibration / Runtime 상태
@@ -425,6 +448,207 @@ def run_hardware_process(
             for event in drain_ordered(main_to_hw_event_queue):
                 event_type = _event_type(event)
 
+                if event_type == "START_MONITOR_ARM_PREPARATION":
+                    monitor_arm_preparation.begin()
+                    monitor_arm_calibration.cancel()
+                    workflow_state = HW_MONITOR_ARM_PREPARING
+                    _put_hardware_event(
+                        hw_to_main_event_queue,
+                        "MONITOR_ARM_PREPARATION_STARTED",
+                        success=True,
+                        message="모니터암 초기 준비 창을 시작했습니다.",
+                    )
+                    continue
+
+                if event_type == "MONITOR_ARM_CONNECT_ALL":
+                    try:
+                        preparation_state = monitor_arm_preparation.connect_all()
+                        motor_bus_opened = bool(motor_service.available)
+                        motor12_opened = bool(motor12.ready)
+                        motor34_opened = bool(motor34.ready)
+                        _put_hardware_event(
+                            hw_to_main_event_queue,
+                            "MONITOR_ARM_CONNECT_ALL_DONE",
+                            success=True,
+                            message="Servo 1~4 연결/Ping/Calibration 확인 완료",
+                            preparation=preparation_state,
+                        )
+                    except Exception as error:
+                        _put_hardware_event(
+                            hw_to_main_event_queue,
+                            "MONITOR_ARM_CONNECT_ALL_DONE",
+                            success=False,
+                            message=f"Servo 1~4 연결 확인 실패: {error}",
+                        )
+                    continue
+
+                if event_type == "MONITOR_ARM_MOVE_WORKING_START":
+                    try:
+                        target = monitor_arm_preparation.request_working_start()
+                        _put_hardware_event(
+                            hw_to_main_event_queue,
+                            "MONITOR_ARM_MOVE_WORKING_START_ACK",
+                            success=True,
+                            message="휴식자세에서 작업 시작 위치로 안전 복구를 시작합니다.",
+                            target={
+                                "shoulder_lift": target.shoulder_lift_deg,
+                                "elbow_flex": target.elbow_flex_deg,
+                            },
+                        )
+                    except Exception as error:
+                        monitor_arm_preparation.record_movement_error(error)
+                        _put_hardware_event(
+                            hw_to_main_event_queue,
+                            "MONITOR_ARM_MOVE_WORKING_START_ACK",
+                            success=False,
+                            message=f"작업 시작 위치 이동 실패: {error}",
+                        )
+                    continue
+
+                if event_type == "MONITOR_ARM_MOVE_REST":
+                    confirmed = bool(event.get("confirmed", False))
+                    if not confirmed:
+                        _put_hardware_event(
+                            hw_to_main_event_queue,
+                            "MONITOR_ARM_MOVE_REST_ACK",
+                            success=False,
+                            message="휴식자세 이동에는 confirmed=True 확인이 필요합니다.",
+                        )
+                        continue
+                    try:
+                        result = monitor_arm_preparation.request_rest()
+                        _put_hardware_event(
+                            hw_to_main_event_queue,
+                            "MONITOR_ARM_MOVE_REST_ACK",
+                            success=True,
+                            message="Motor1/2 휴식자세 이동 명령을 전송했습니다.",
+                            result=result,
+                        )
+                    except Exception as error:
+                        _put_hardware_event(
+                            hw_to_main_event_queue,
+                            "MONITOR_ARM_MOVE_REST_ACK",
+                            success=False,
+                            message=f"휴식자세 이동 실패: {error}",
+                        )
+                    continue
+
+                if event_type == "MONITOR_ARM_MANUAL_IK_TARGET":
+                    try:
+                        target = monitor_arm_preparation.command_manual_ik(
+                            event["user_x_m"],
+                            event["user_monitor_distance_m"],
+                            event["monitor_z_m"],
+                        )
+                        _put_hardware_event(
+                            hw_to_main_event_queue,
+                            "MONITOR_ARM_MANUAL_IK_TARGET_ACK",
+                            success=True,
+                            message="Motor1/2 수동 IK 목표를 전송했습니다.",
+                            target={
+                                "shoulder_lift": target.shoulder_lift_deg,
+                                "elbow_flex": target.elbow_flex_deg,
+                            },
+                        )
+                    except Exception as error:
+                        _put_hardware_event(
+                            hw_to_main_event_queue,
+                            "MONITOR_ARM_MANUAL_IK_TARGET_ACK",
+                            success=False,
+                            message=f"수동 IK 명령 실패: {error}",
+                        )
+                    continue
+
+                if event_type == "MONITOR_ARM_GIMBAL_JOG":
+                    try:
+                        target = monitor_arm_preparation.jog_gimbal(
+                            str(event.get("joint", "")),
+                            float(event.get("delta_deg", 0.0)),
+                            int(event.get("speed", 100)),
+                        )
+                        _put_hardware_event(
+                            hw_to_main_event_queue,
+                            "MONITOR_ARM_GIMBAL_JOG_ACK",
+                            success=True,
+                            message=f"{event.get('joint')} 목표 {target:+.2f}°",
+                            joint=event.get("joint"),
+                            target_deg=target,
+                        )
+                    except Exception as error:
+                        _put_hardware_event(
+                            hw_to_main_event_queue,
+                            "MONITOR_ARM_GIMBAL_JOG_ACK",
+                            success=False,
+                            message=f"Gimbal 조그 실패: {error}",
+                            joint=event.get("joint"),
+                        )
+                    continue
+
+                if event_type == "MONITOR_ARM_GIMBAL_JOG_STOP":
+                    monitor_arm_preparation.stop_gimbal_jog(event.get("joint"))
+                    continue
+
+                if event_type == "START_MONITOR_ARM_SENSOR_CAPTURE":
+                    preparation_state = monitor_arm_preparation.snapshot()
+                    if not enable_pose:
+                        message = "POSE_ONLY 또는 BOTH 프로필이 아니어서 눈 간격을 측정할 수 없습니다."
+                        success = False
+                    elif not preparation_state.get("all_motors_ready", False):
+                        message = "먼저 Motor1~4 연결 확인을 완료해주세요."
+                        success = False
+                    elif not preparation_state.get("working_start_completed", False):
+                        message = "먼저 휴식자세에서 작업 시작 위치로 이동해주세요."
+                        success = False
+                    else:
+                        monitor_arm_calibration.start()
+                        message = "ToF와 MediaPipe 눈 간격의 5초 평균 측정을 시작합니다."
+                        success = True
+                    _put_hardware_event(
+                        hw_to_main_event_queue,
+                        "MONITOR_ARM_SENSOR_CAPTURE_STARTED",
+                        success=success,
+                        message=message,
+                    )
+                    continue
+
+                if event_type == "FINISH_MONITOR_ARM_PREPARATION":
+                    calibration_state = monitor_arm_calibration.snapshot()
+                    preparation_state = monitor_arm_preparation.snapshot()
+                    success = bool(
+                        calibration_state.get("session_ready", False)
+                        and preparation_state.get("all_motors_ready", False)
+                        and preparation_state.get("working_start_completed", False)
+                    )
+                    if success:
+                        monitor_arm_preparation.end()
+                        workflow_state = HW_IDLE
+                        message = "모터 자세와 ToF/눈 간격 초기 준비를 완료했습니다."
+                    else:
+                        message = (
+                            "모터 1~4 연결, 작업 시작 위치 이동, 센서 평균 저장을 "
+                            "모두 완료해야 합니다."
+                        )
+                    _put_hardware_event(
+                        hw_to_main_event_queue,
+                        "MONITOR_ARM_PREPARATION_FINISHED",
+                        success=success,
+                        message=message,
+                        calibration=calibration_state,
+                    )
+                    continue
+
+                if event_type == "CANCEL_MONITOR_ARM_PREPARATION":
+                    monitor_arm_calibration.cancel()
+                    monitor_arm_preparation.end()
+                    workflow_state = HW_IDLE
+                    _put_hardware_event(
+                        hw_to_main_event_queue,
+                        "MONITOR_ARM_PREPARATION_CANCELLED",
+                        success=True,
+                        message="모니터암 초기 준비를 취소했습니다.",
+                    )
+                    continue
+
                 if event_type == "PREPARE_CALIBRATION":
                     calibration_generation += 1
                     calibration_ready_emitted = False
@@ -442,6 +666,9 @@ def run_hardware_process(
 
                     if not motor34_opened or not motor34.ready:
                         missing.append("Motor3/4")
+
+                    if not monitor_arm_calibration.session_ready:
+                        missing.append("MonitorArm ToF/눈 간격 초기 준비")
 
                     if missing:
                         workflow_state = HW_IDLE
@@ -723,6 +950,44 @@ def run_hardware_process(
             # 실제 I2C read는 설정된 주기로만 수행된다.
             latest_tof_state = tof_service.update()
 
+            if monitor_arm_calibration.running:
+                monitor_arm_calibration.add_tof_state(latest_tof_state)
+                monitor_arm_calibration.add_pose_state(latest_pose_state)
+                if monitor_arm_calibration.finished_by_time:
+                    try:
+                        metadata = monitor_arm_preparation.calibration_metadata()
+                        calibration_state = monitor_arm_calibration.finish(metadata)
+                        success = bool(calibration_state.get("session_ready", False))
+                        if success:
+                            vision_estimator.calibrate(
+                                calibration_state["eye_gap_baseline_px"],
+                                calibration_state[
+                                    "user_monitor_distance_baseline_m"
+                                ],
+                            )
+                            message = (
+                                "초기 준비 센서 평균 저장 완료: "
+                                f"ToF {calibration_state['tof_user_x_baseline_m']:.3f}m, "
+                                f"Eye {calibration_state['eye_gap_baseline_px']:.2f}px"
+                            )
+                        else:
+                            message = (
+                                "초기 준비 센서 평균 실패: "
+                                + str(calibration_state.get("last_error"))
+                            )
+                    except Exception as error:
+                        monitor_arm_calibration.cancel()
+                        calibration_state = monitor_arm_calibration.snapshot()
+                        success = False
+                        message = f"초기 준비 센서 평균 저장 실패: {error}"
+                    _put_hardware_event(
+                        hw_to_main_event_queue,
+                        "MONITOR_ARM_SENSOR_CAPTURE_DONE",
+                        success=success,
+                        message=message,
+                        calibration=calibration_state,
+                    )
+
 
             if now - last_imu_sample_time >= imu.sample_interval:
                 last_imu_sample_time = now
@@ -784,7 +1049,9 @@ def run_hardware_process(
             # ==================================================
             # E. Main mode -> Hardware workflow
             # ==================================================
-            if main_mode == "CALIBRATING" and imu.calibrated:
+            if main_mode == "MONITOR_ARM_PREPARATION":
+                workflow_state = HW_MONITOR_ARM_PREPARING
+            elif main_mode == "CALIBRATING" and imu.calibrated:
                 workflow_state = HW_POSE_CALIBRATING
             elif main_mode == "MEASURING" and imu.calibrated:
                 workflow_state = HW_MEASURING
@@ -929,11 +1196,37 @@ def run_hardware_process(
             # F. Motor control context
             # ==================================================
             imu_ready = bool(imu.available and imu.calibrated and not imu.calibrating)
-            # Motor1/2는 모니터 거리 자동추종 장치이므로
-            # CALIBRATING / MEASURING 같은 Main mode에만 묶지 않는다.
-            # 유효한 ToF/Fusion user_x가 존재하는 동안 계속 추종 요청한다.
+            latest_preparation_state = monitor_arm_preparation.update(now)
+            preparation_active = bool(
+                latest_preparation_state.get("active", False)
+            )
+            preparation_recovery = bool(
+                preparation_active
+                and latest_preparation_state.get("recovery_active", False)
+            )
+
+            motor12_input_state = dict(latest_monitor_arm_input_state)
+            if preparation_recovery and not motor12_input_state.get("valid", False):
+                motor12_input_state = {
+                    "valid": True,
+                    "user_x_m": float(
+                        monitor_arm_settings.get("manual_cartesian", {}).get(
+                            "user_x_min_m", 0.6007655
+                        )
+                    ),
+                    "last_error": None,
+                    "source": "PREPARATION_RECOVERY",
+                }
+            # 준비 창에서는 오직 명시적인 Recovery/수동 IK만 허용한다.
+            # 일반 ToF/Vision 자동추종은 실제 자세 측정(MEASURING) 중에만 켜서
+            # 카메라/Process 초기화 직후 팔이 예기치 않게 움직이지 않게 한다.
             motor12_requested = bool(
-                latest_monitor_arm_input_state.get("valid", False, )
+                preparation_recovery
+                or (
+                    not preparation_active
+                    and main_mode == "MEASURING"
+                    and latest_monitor_arm_input_state.get("valid", False)
+                )
             )
 
             motor12_active = bool(
@@ -941,7 +1234,10 @@ def run_hardware_process(
                 and motor12.ready
             )
 
-            motor34_requested = main_mode in ("CALIBRATING", "MEASURING", )
+            motor34_requested = bool(
+                not preparation_active
+                and main_mode in ("CALIBRATING", "MEASURING")
+            )
 
             motor34_active = bool(
                 motor34_requested
@@ -961,7 +1257,7 @@ def run_hardware_process(
                 # 기존 context 구조가 여러 flat key로 늘어나지 않도록 한다.
                 "motor12": {
                     "control_active": motor12_active,
-                    "input": latest_monitor_arm_input_state,
+                    "input": motor12_input_state,
                 },
 
                 "motor34_control_active": motor34_active,
@@ -970,6 +1266,7 @@ def run_hardware_process(
             # 실행 순서가 코드에 그대로 보이도록 유지한다.
             latest_motor12_state = motor12.update(context)   # Motor 1 -> 2
             latest_motor34_state = motor34.update(context)   # Motor 3 -> 4
+            latest_preparation_state = monitor_arm_preparation.update(now)
 
             # 기존 Motor3/4 최상위 진단값(command_hz, axis_mapping 등)은
             # 호환성을 위해 유지한다. 대신 available/enabled/ready/control_active는
@@ -1049,6 +1346,26 @@ def run_hardware_process(
                     "imu": dict(latest_imu_state),
                     "tof": dict(latest_tof_state),
                     "monitor_arm_input": dict(latest_monitor_arm_input_state),
+                    "monitor_arm": {
+                        "calibration": monitor_arm_calibration.snapshot(),
+                        "preparation": dict(latest_preparation_state),
+                        "live_eye_gap_px": (
+                            latest_pose_state.get("eye_gap_px")
+                            if isinstance(latest_pose_state, dict)
+                            else None
+                        ),
+                        "live_tof_user_x_m": latest_monitor_arm_input_state.get(
+                            "tof_user_x_m"
+                        ),
+                        "fusion_weights": {
+                            "tof": user_x_fusion.tof_weight,
+                            "vision": user_x_fusion.vision_weight,
+                        },
+                        "control_prerequisites_ready": bool(
+                            monitor_arm_calibration.session_ready
+                            and latest_monitor_arm_input_state.get("valid", False)
+                        ),
+                    },
                     "motor": latest_motor_state,
                     "gimbal": {
                         "requested": motor34_requested,
@@ -1073,6 +1390,7 @@ def run_hardware_process(
         # HardwareProcess가 소유한 I2C/Serial 장치를 모두 정리한다.
         # 각 Controller의 runtime 상태를 먼저 정리한 뒤
         # 공통 MotorService Serial bus를 마지막에 닫는다.
+        monitor_arm_preparation.end()
         tof_source.close()
         motor12.close()
         motor34.close()

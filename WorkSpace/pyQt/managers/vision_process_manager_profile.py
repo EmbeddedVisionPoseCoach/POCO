@@ -283,6 +283,24 @@ class VisionProcessManager:
     # --------------------------------------------------------
     # Main -> Vision
     # --------------------------------------------------------
+    def start_monitor_arm_preparation(self):
+        """준비 창 동안 Pose MediaPipe에 프레임을 계속 공급한다."""
+        self.accept_frames = True
+        if self.enable_pose:
+            if not put_ordered(self.pose_command_queue, "START_PREPARATION"):
+                return False
+        if self.enable_face:
+            put_ordered(self.face_command_queue, "STOP")
+        self.send_main_state("MONITOR_ARM_PREPARATION")
+        return True
+
+    def finish_monitor_arm_preparation(self):
+        """준비 완료 후 일반 카메라 프리뷰 상태로 되돌린다."""
+        self.accept_frames = False
+        if self.enable_pose:
+            put_ordered(self.pose_command_queue, "STOP")
+        self.send_main_state("PREVIEW")
+
     def start_calibration(self):
         """Calibration 버튼에서만 새 baseline 측정을 시작한다."""
         self.accept_frames = True
@@ -547,4 +565,3 @@ class VisionProcessManager:
             process.close()
         except Exception:
             pass
-

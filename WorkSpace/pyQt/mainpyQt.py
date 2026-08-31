@@ -19,6 +19,7 @@ sys.path.append(str(ROOT_DIR))
 
 import modules.config as config
 from camera_worker_profile_all import CameraWorker
+from monitor_arm_preparation_dialog import MonitorArmPreparationDialog
 from managers.vision_process_manager_profile import PROFILE_MODE
 from modules.app_settings import SettingsManager, AlarmSettings
 from services.hardware_config_service import HardwareConfigService
@@ -77,6 +78,8 @@ class MainWindow(QMainWindow):
         self.latest_face_state = None
         self.latest_hardware_state = None
         self.latest_hardware_event = None
+        self.monitor_arm_preparation_dialog = None
+        self.monitor_arm_preparation_ready = False
 
         self.current_alarm_settings = None
 
@@ -239,6 +242,10 @@ class MainWindow(QMainWindow):
             return
         self.latest_hardware_event = event
 
+        dialog = self.monitor_arm_preparation_dialog
+        if dialog is not None and dialog.isVisible():
+            dialog.handle_hardware_event(event)
+
         if isinstance(event, dict):
             event_type = str(event.get("type", "")).upper()
             if event_type in (
@@ -356,21 +363,53 @@ class MainWindow(QMainWindow):
     # ------------------------
     def on_calibration_clicked(self):
         """
-        Calibration 버튼:
-        카메라 프리뷰를 켜고 사용자가 자세를 준비하는 단계.
+        초기값 준비 버튼: 카메라/Pose AI와 모니터암 준비 창을 시작한다.
         """
 
         self.ensure_camera_worker()
 
         if self.camera_worker is not None:
-            self.camera_worker.start_preview()
+            self.camera_worker.start_monitor_arm_preparation()
+
+        self.monitor_arm_preparation_ready = False
+        self.send_hardware_command({"type": "START_MONITOR_ARM_PREPARATION"})
+
+        old_dialog = self.monitor_arm_preparation_dialog
+        if old_dialog is not None:
+            old_dialog.close()
+
+        self.monitor_arm_preparation_dialog = MonitorArmPreparationDialog(
+            send_command=self.send_hardware_command,
+            get_hardware_state=self.get_latest_hardware_state,
+            parent=self,
+        )
+        self.monitor_arm_preparation_dialog.preparation_finished.connect(
+            self.on_monitor_arm_preparation_finished
+        )
+        self.monitor_arm_preparation_dialog.show()
 
         self.btnCalibration.setEnabled(False)
-        self.btnCalibrationStart.setEnabled(True)
+        self.btnCalibrationStart.setEnabled(False)
         self.btnCamOn.setEnabled(False)
         self.btnCamOff.setEnabled(True)
 
-        self.set_status("바른 자세를 잡은 뒤 초기값준비 버튼을 눌러주세요.")
+        self.set_status(
+            "준비 창에서 모터 자세를 조정하고 ToF/눈 간격 평균을 저장해주세요."
+        )
+
+    def on_monitor_arm_preparation_finished(self, success, message):
+        if self.camera_worker is not None:
+            self.camera_worker.finish_monitor_arm_preparation()
+        self.monitor_arm_preparation_ready = bool(success)
+        self.btnCalibration.setEnabled(not success)
+        self.btnCalibrationStart.setEnabled(bool(success))
+        self.btnCamOn.setEnabled(False)
+        self.btnCamOff.setEnabled(True)
+        self.set_status(
+            "모니터암 초기 준비 완료. 이제 초기값 측정시작을 눌러주세요."
+            if success
+            else message
+        )
 
     def on_calibration_start_clicked(self):
         """
@@ -383,6 +422,24 @@ class MainWindow(QMainWindow):
                 self,
                 "Calibration",
                 "먼저 초기값 준비 버튼을 눌러 카메라를 실행해주세요."
+            )
+            return
+
+        hardware_state = self.get_latest_hardware_state()
+        arm_calibration = (
+            hardware_state.get("monitor_arm", {}).get("calibration", {})
+            if isinstance(hardware_state, dict)
+            else {}
+        )
+        if not (
+            self.monitor_arm_preparation_ready
+            and arm_calibration.get("session_ready", False)
+        ):
+            QMessageBox.warning(
+                self,
+                "초기값 측정 시작 불가",
+                "먼저 초기값 준비 창에서 모터 자세 조정과 ToF/눈 간격 5초 평균 "
+                "저장을 완료해주세요.",
             )
             return
 
@@ -471,6 +528,11 @@ class MainWindow(QMainWindow):
 
 
     def on_camera_off_clicked(self):
+        dialog = self.monitor_arm_preparation_dialog
+        if dialog is not None and dialog.isVisible():
+            dialog.cancel_preparation()
+        self.monitor_arm_preparation_dialog = None
+        self.monitor_arm_preparation_ready = False
         self.stop_camera_worker()
 
         self.label.clear()
@@ -569,6 +631,9 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         print("[SHUTDOWN] closeEvent 진입")
+        dialog = self.monitor_arm_preparation_dialog
+        if dialog is not None and dialog.isVisible():
+            dialog.close()
         self._app_closing = True
         self.stop_camera_worker(full_shutdown=True)
 

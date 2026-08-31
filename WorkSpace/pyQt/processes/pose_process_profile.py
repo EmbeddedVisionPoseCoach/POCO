@@ -17,6 +17,7 @@ faulthandler.enable(all_threads=True)
 
 import sys
 import time
+import math
 from pathlib import Path
 from queue import Empty
 
@@ -35,10 +36,14 @@ from services.calibration_service import CalibrationService
 from services.pose_gru_service import PoseGruService
 
 MODE_IDLE = "IDLE"
+MODE_PREPARING = "PREPARING"
 MODE_CALIBRATING = "CALIBRATING"
 MODE_WAITING = "WAITING"
 MODE_MEASURING = "MEASURING"
 PROFILE_INTERVAL_SEC = 2.0
+LEFT_EYE_INDEX = 2
+RIGHT_EYE_INDEX = 5
+MINIMUM_EYE_GAP_PX = 5.0
 
 
 class ProcessProfiler:
@@ -158,6 +163,27 @@ def serialize_pose_landmarks(results):
     ]
 
 
+def measure_pose_eye_gap_px(results, frame_width, frame_height):
+    """MediaPipe Pose 2·5번 눈 landmark의 2D pixel 간격을 반환한다."""
+    if results is None or not results.pose_landmarks:
+        return None
+    landmarks = results.pose_landmarks.landmark
+    if len(landmarks) <= RIGHT_EYE_INDEX:
+        return None
+    left = landmarks[LEFT_EYE_INDEX]
+    right = landmarks[RIGHT_EYE_INDEX]
+    if float(getattr(left, "visibility", 1.0)) < 0.5:
+        return None
+    if float(getattr(right, "visibility", 1.0)) < 0.5:
+        return None
+    dx_px = (float(left.x) - float(right.x)) * float(frame_width)
+    dy_px = (float(left.y) - float(right.y)) * float(frame_height)
+    gap_px = math.hypot(dx_px, dy_px)
+    if not math.isfinite(gap_px) or gap_px < MINIMUM_EYE_GAP_PX:
+        return None
+    return gap_px
+
+
 def run_pose_process(
     stop_event,
     command_queue,
@@ -252,6 +278,25 @@ def run_pose_process(
                     result_queue.put(started_event)
                     put_ordered(pose_to_hw_event_queue, started_event)
                     print("[PoseProcess:PROFILE] Calibration 시작")
+
+                elif command == "START_PREPARATION":
+                    calibration_service.cancel()
+                    gru_service.stop()
+                    mode = MODE_PREPARING
+                    previous_frame_id = None
+                    processed_count = 0
+                    sequence_drop_count = 0
+                    stat_start_time = time.monotonic()
+                    profiler.reset()
+                    prepared_event = {
+                        "type": "POSE_PREPARATION_STARTED",
+                        "success": True,
+                        "message": "준비 창용 MediaPipe Pose/눈 간격 측정을 시작했습니다.",
+                        "timestamp": time.time(),
+                    }
+                    result_queue.put(prepared_event)
+                    put_ordered(pose_to_hw_event_queue, prepared_event)
+                    print("[PoseProcess:PROFILE] Monitor-arm preparation 시작")
 
                 elif command in ("START", "START_MEASUREMENT"):
                     calibration_service.cancel()
@@ -356,6 +401,11 @@ def run_pose_process(
             feature_start = time.perf_counter_ns()
             features = build_pose_features(results)
             landmarks = serialize_pose_landmarks(results)
+            eye_gap_px = measure_pose_eye_gap_px(
+                results,
+                frame.shape[1],
+                frame.shape[0],
+            )
             feature_end = time.perf_counter_ns()
             profiler.add("feature", feature_end - feature_start)
 
@@ -368,6 +418,8 @@ def run_pose_process(
                 "mode": mode,
                 "landmark_valid": landmarks is not None,
                 "landmarks": landmarks,
+                "eye_gap_valid": eye_gap_px is not None,
+                "eye_gap_px": eye_gap_px,
                 "features": features.tolist() if features is not None else None,
                 "inference": None,
                 "calibration": None,

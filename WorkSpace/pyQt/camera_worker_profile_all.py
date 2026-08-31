@@ -199,6 +199,7 @@ class PiCamera2Source:
 
 class RunMode(Enum):
     PREVIEW = auto()
+    PREPARING = auto()
     CALIBRATING = auto()
     MEASURING = auto()
 
@@ -222,6 +223,7 @@ class CameraWorker(QThread):
         self.camera = None
 
         self.pending_preview_start = False
+        self.pending_preparation_start = False
         self.pending_calibration_start = False
         self.pending_measurement_start = False
         self.hardware_calibration_preparing = False
@@ -369,6 +371,10 @@ class CameraWorker(QThread):
         raise RuntimeError("사용 가능한 카메라를 찾지 못했습니다.\n" + "\n".join(errors))
 
     def apply_pending_command(self):
+        if self.pending_preparation_start and self.result_worker.is_ready:
+            self.pending_preparation_start = False
+            self.start_monitor_arm_preparation()
+            return
         if self.pending_calibration_start and self.result_worker.is_ready:
             self.pending_calibration_start = False
             self.start_calibration()
@@ -399,6 +405,28 @@ class CameraWorker(QThread):
         self.vision_manager.stop_analysis()
         self.vision_manager.send_main_state("PREVIEW")
         self.status_changed.emit("프리뷰 모드입니다. 바른 자세를 준비해주세요.")
+
+    def start_monitor_arm_preparation(self):
+        """카메라 프리뷰와 준비용 Pose 눈 랜드마크 처리를 함께 시작한다."""
+        if not self.running or not self.result_worker.is_ready:
+            self.pending_preparation_start = True
+            self.status_changed.emit("카메라/Pose AI 준비 중입니다.")
+            return
+        self.mode = RunMode.PREPARING
+        if not self.vision_manager.start_monitor_arm_preparation():
+            self.status_changed.emit("모니터암 준비용 Pose AI를 시작하지 못했습니다.")
+            return
+        self.status_changed.emit(
+            "모니터암 초기 준비 중: MediaPipe 눈 간격과 ToF를 확인하세요."
+        )
+
+    def finish_monitor_arm_preparation(self):
+        self.pending_preparation_start = False
+        self.vision_manager.finish_monitor_arm_preparation()
+        self.mode = RunMode.PREVIEW
+        self.status_changed.emit(
+            "모니터암 초기 준비 완료. 이제 초기값 측정시작을 눌러주세요."
+        )
 
     def start_calibration(self):
         """IMU X/Y 기준값 Calibration 완료 후 Pose/Face baseline Calibration을 시작한다."""
@@ -507,6 +535,12 @@ class CameraWorker(QThread):
         hardware_state = getattr(self.result_worker, "latest_hardware_state", None)
         imu_state = hardware_state.get("imu", {}) if isinstance(hardware_state, dict) else {}
         motor_state = hardware_state.get("motor", {}) if isinstance(hardware_state, dict) else {}
+        monitor_arm_state = (
+            hardware_state.get("monitor_arm", {})
+            if isinstance(hardware_state, dict)
+            else {}
+        )
+        monitor_arm_calibration = monitor_arm_state.get("calibration", {})
 
         imu_ready = bool(
             imu_state.get("available", False)
@@ -523,6 +557,18 @@ class CameraWorker(QThread):
             message = (
                 "현재 실행 세션의 IMU/Motor3/4 준비가 완료되지 않았습니다. "
                 "먼저 초기값 준비 -> 초기값 측정을 진행해 IMU X/Y 기준값을 완료해주세요."
+            )
+            self.measurement_started.emit(False, message)
+            self.status_changed.emit(message)
+            return
+
+        if (
+            self.vision_manager.enable_pose
+            and not monitor_arm_calibration.get("session_ready", False)
+        ):
+            message = (
+                "현재 실행 세션의 ToF/눈 간격 5초 평균값이 없습니다. "
+                "먼저 초기값 준비를 완료해주세요."
             )
             self.measurement_started.emit(False, message)
             self.status_changed.emit(message)

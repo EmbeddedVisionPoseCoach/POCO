@@ -1,8 +1,15 @@
 import time
 from dataclasses import dataclass
 
-from services.monitor_arm_kinematics import JointCommand
-from services.monitor_arm_planner import MonitorArmPlanner
+from services.monitor_arm_kinematics import (
+    JointCommand,
+    MotionSafetyError,
+    monitor_target_from_user,
+)
+from services.monitor_arm_planner import (
+    MonitorArmPlanner,
+    RecoveryTimeoutError,
+)
 from services.monitor_arm_speed import select_speed, validate_speed_profile
 
 MOTOR1_SERVO_ID = 1
@@ -365,7 +372,7 @@ class Motor12Controller:
         # 새 기준으로 잡도록 기존 Planner reference를 제거한다.
         if reset_reference and self.planner is not None:
             self.planner.reference_z_m = None
-            self.planner.recovery_active = False
+            self.planner.cancel_working_pose_recovery()
 
     def _calibration_ranges(self):
         """Motor1/2의 현재 Calibration 안전각 범위를 반환한다."""
@@ -696,6 +703,81 @@ class Motor12Controller:
             "special": needs_special,
         }
 
+    def move_manual_user_target(
+        self,
+        user_x_m,
+        user_monitor_distance_m,
+        monitor_z_m,
+    ):
+        """초기 준비 UI의 사용자 X/Z 입력을 한 번의 안전한 IK 명령으로 보낸다."""
+        if not (
+            self.available
+            and self.enabled
+            and self.motor.available
+            and self.ready
+            and self.planner is not None
+        ):
+            return {
+                "accepted": False,
+                "error": "Motor1/2 수동 IK를 실행할 준비가 되지 않았습니다.",
+            }
+
+        try:
+            current = self._read_current_angles()
+            block_reason = self._normal_tracking_block_reason(current)
+            if block_reason is not None:
+                raise RuntimeError(
+                    "현재 자세는 수동 IK 안전범위 밖입니다. "
+                    "먼저 '휴식 → 작업 시작 위치 이동'을 완료해주세요."
+                )
+
+            monitor_z_m = float(monitor_z_m)
+            requested_pose = monitor_target_from_user(
+                user_x_m=float(user_x_m),
+                user_monitor_distance_m=float(user_monitor_distance_m),
+                monitor_z_m=monitor_z_m,
+            )
+            target = self.planner.kinematics.inverse(
+                requested_pose.x_m,
+                requested_pose.z_m,
+            )
+            self.planner.kinematics.validate_motion(
+                current=current,
+                target=target,
+                reference_z_m=monitor_z_m,
+                limits=self.planner.limits,
+                calibration_ranges=self._calibration_ranges(),
+                enforce_step_limit=False,
+            )
+            result = self._move_normal_target(target)
+            self.rest_mode = False
+            self.planner.reference_z_m = monitor_z_m
+            self.planner.cancel_working_pose_recovery()
+            self.last_target = target
+            self.last_command_speed = int(result["speed"])
+            self.last_largest_delta_deg = float(result["largest_delta_deg"])
+            self.last_recovery_special = False
+            self.last_success = True
+            self.last_error = None
+            self.hold_reason = "MANUAL_PREPARATION"
+            return {
+                "accepted": True,
+                "target": {
+                    MOTOR1_JOINT: float(target.shoulder_lift_deg),
+                    MOTOR2_JOINT: float(target.elbow_flex_deg),
+                },
+                "monitor_pose": {
+                    "x_m": float(requested_pose.x_m),
+                    "z_m": float(requested_pose.z_m),
+                },
+                **result,
+            }
+        except Exception as error:
+            self.last_success = False
+            self.last_error = str(error)
+            self.hold_reason = "MANUAL_PREPARATION_ERROR"
+            return {"accepted": False, "error": str(error)}
+
     def move_to_rest(self):
         """확인된 Rest 특수 자세로 Motor1/2를 동시에 이동한다.
 
@@ -1025,6 +1107,9 @@ class Motor12Controller:
             return self.latest_state
 
         self.last_command_time = now
+        recovery_was_active = bool(
+            self.planner is not None and self.planner.recovery_active
+        )
 
         try:
             current = (
@@ -1046,6 +1131,19 @@ class Motor12Controller:
                 # 작업자세에 충분히 가까워지면 Planner가 Recovery latch를
                 # 해제하고 None을 반환한다.
                 if target is None:
+                    if self.planner.recovery_active:
+                        self.last_target = None
+                        self.last_command_speed = 0
+                        self.last_largest_delta_deg = float(
+                            self.planner.recovery_largest_error_deg or 0.0
+                        )
+                        self.last_recovery_special = False
+                        self.last_success = True
+                        self.last_error = None
+                        self.hold_reason = "RECOVERY_STABILIZING"
+                        self.latest_state = self._build_state(True)
+                        return self.latest_state
+
                     self.last_target = None
                     self.last_command_speed = 0
                     self.last_largest_delta_deg = 0.0
@@ -1160,10 +1258,17 @@ class Motor12Controller:
             self.last_success = False
             self.last_error = str(error)
 
-            if self.planner.recovery_active:
-                self.hold_reason = (
-                    "RECOVERY_ERROR"
+            if recovery_was_active:
+                self.last_largest_delta_deg = (
+                    self.planner.recovery_largest_error_deg or 0.0
                 )
+                self.planner.cancel_working_pose_recovery()
+                if isinstance(error, RecoveryTimeoutError):
+                    self.hold_reason = "RECOVERY_TIMEOUT"
+                elif isinstance(error, MotionSafetyError):
+                    self.hold_reason = "RECOVERY_SAFETY_ERROR"
+                else:
+                    self.hold_reason = "RECOVERY_COMMAND_ERROR"
             else:
                 self.hold_reason = "ERROR"
 
@@ -1217,6 +1322,31 @@ class Motor12Controller:
             "recovery_active": bool(
                 self.planner is not None
                 and self.planner.recovery_active
+            ),
+            "recovery_goal_error_deg": (
+                None
+                if self.planner is None
+                else self.planner.recovery_largest_error_deg
+            ),
+            "recovery_stable_samples": (
+                0
+                if self.planner is None
+                else self.planner.recovery_stable_sample_count
+            ),
+            "recovery_required_stable_samples": (
+                None
+                if self.planner is None
+                else self.planner.working_start_stable_samples
+            ),
+            "recovery_arrival_tolerance_deg": (
+                None
+                if self.planner is None
+                else self.planner.working_start_arrival_tolerance_deg
+            ),
+            "recovery_timeout_sec": (
+                None
+                if self.planner is None
+                else self.planner.working_start_timeout_sec
             ),
             "recovery_special_move": bool(self.last_recovery_special),
             "rest_target": (

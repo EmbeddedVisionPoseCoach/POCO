@@ -8,6 +8,8 @@ existing POCO process/service layers.
 
 from __future__ import annotations
 
+import time
+
 from services.monitor_arm_kinematics import (
     ArmGeometry,
     JointCommand,
@@ -16,6 +18,10 @@ from services.monitor_arm_kinematics import (
     TwoJointMonitorArm,
     monitor_target_from_user,
 )
+
+
+class RecoveryTimeoutError(MotionSafetyError):
+    """Raised when working-pose recovery cannot settle before its deadline."""
 
 
 class MonitorArmPlanner:
@@ -50,7 +56,22 @@ class MonitorArmPlanner:
             float(working.get("shoulder_lift_deg", 0.0)),
             float(working.get("elbow_flex_deg", 0.0)),
         )
+        self.working_start_arrival_tolerance_deg = max(
+            0.01,
+            float(control.get("working_start_arrival_tolerance_deg", 1.0)),
+        )
+        self.working_start_stable_samples = max(
+            1,
+            int(control.get("working_start_stable_samples", 3)),
+        )
+        self.working_start_timeout_sec = max(
+            0.1,
+            float(control.get("working_start_timeout_sec", 25.0)),
+        )
         self.recovery_active = False
+        self.recovery_started_at: float | None = None
+        self.recovery_stable_sample_count = 0
+        self.recovery_largest_error_deg: float | None = None
 
     @staticmethod
     def _clamp(value: float, minimum: float, maximum: float) -> float:
@@ -68,16 +89,25 @@ class MonitorArmPlanner:
         current_z_m = self.kinematics.forward(current).z_m
         if self.working_z_min_m <= current_z_m <= self.working_z_max_m:
             self.reference_z_m = current_z_m
-            self.recovery_active = False
+            self.cancel_working_pose_recovery()
         else:
             self.reference_z_m = self.default_working_z_m
-            self.recovery_active = True
+            self.request_working_pose_recovery()
         return self.reference_z_m
 
     def request_working_pose_recovery(self) -> None:
         """Latch recovery until the configured working posture is reached."""
         self.reference_z_m = self.default_working_z_m
         self.recovery_active = True
+        self.recovery_started_at = time.monotonic()
+        self.recovery_stable_sample_count = 0
+        self.recovery_largest_error_deg = None
+
+    def cancel_working_pose_recovery(self) -> None:
+        """Stop recovery without treating the current pose as an arrival."""
+        self.recovery_active = False
+        self.recovery_started_at = None
+        self.recovery_stable_sample_count = 0
 
     def _effective_joint_ranges(
         self,
@@ -175,9 +205,30 @@ class MonitorArmPlanner:
             abs(self.working_command.shoulder_lift_deg - current.shoulder_lift_deg),
             abs(self.working_command.elbow_flex_deg - current.elbow_flex_deg),
         )
-        if largest_joint_change <= 0.25:
-            self.recovery_active = False
+        self.recovery_largest_error_deg = largest_joint_change
+        if self.recovery_started_at is None:
+            self.recovery_started_at = time.monotonic()
+        elapsed_sec = time.monotonic() - self.recovery_started_at
+        if elapsed_sec >= self.working_start_timeout_sec:
+            raise RecoveryTimeoutError(
+                "작업자세 복구 시간 초과: "
+                f"{elapsed_sec:.1f}초 경과, 최대 관절 오차 "
+                f"{largest_joint_change:.2f}° "
+                f"(허용 {self.working_start_arrival_tolerance_deg:.2f}°)."
+            )
+
+        if largest_joint_change <= self.working_start_arrival_tolerance_deg:
+            self.recovery_stable_sample_count += 1
+            if (
+                self.recovery_stable_sample_count
+                >= self.working_start_stable_samples
+            ):
+                self.recovery_active = False
+                self.recovery_started_at = None
+                return None
             return None
+        else:
+            self.recovery_stable_sample_count = 0
         ratio = min(1.0, self.limits.max_joint_step_deg / largest_joint_change)
         target = current.interpolate(self.working_command, ratio)
         self._validate_recovery_step(current, target, calibration_ranges)

@@ -21,6 +21,11 @@ from services.hardware_constants import (
 )
 from services.hardware_state_store import HardwareRuntimeStateStore
 from services.imu_service import ADXL345IMUService
+from services.monitor_arm_kinematics import JointCommand
+from services.monitor_arm_planner import MonitorArmPlanner
+from services.monitor_arm_preparation_controller import (
+    MonitorArmPreparationController,
+)
 from services.monitor_arm_user_x import (
     EyeGapVisionDistanceEstimator,
     ToFUserXSource,
@@ -243,6 +248,38 @@ def main():
         monitor_arm_settings["control"]["pose_acc"]
         == 20
     )
+    assert (
+        monitor_arm_settings["control"]["working_start_arrival_tolerance_deg"]
+        == 1.0
+    )
+    assert (
+        monitor_arm_settings["control"]["working_start_stable_samples"]
+        == 3
+    )
+    assert (
+        monitor_arm_settings["control"]["working_start_timeout_sec"]
+        == 25.0
+    )
+
+    # 0.25°보다 크지만 설정 허용치 안인 실제 정지 오차도
+    # 연속 3개 샘플에서만 도착으로 확정해야 한다.
+    arrival_planner = MonitorArmPlanner(monitor_arm_settings)
+    arrival_planner.working_command = JointCommand(0.0, 0.0)
+    arrival_planner.request_working_pose_recovery()
+    near_target = JointCommand(0.8, -0.7)
+    outside_target = JointCommand(1.2, -0.7)
+    assert arrival_planner.plan(near_target, user_x_m=0.73) is None
+    assert arrival_planner.recovery_active is True
+    assert arrival_planner.recovery_stable_sample_count == 1
+    assert arrival_planner.plan(outside_target, user_x_m=0.73) is not None
+    assert arrival_planner.recovery_stable_sample_count == 0
+    assert arrival_planner.plan(near_target, user_x_m=0.73) is None
+    assert arrival_planner.recovery_active is True
+    assert arrival_planner.plan(near_target, user_x_m=0.73) is None
+    assert arrival_planner.recovery_active is True
+    assert arrival_planner.plan(near_target, user_x_m=0.73) is None
+    assert arrival_planner.recovery_active is False
+    assert arrival_planner.recovery_stable_sample_count == 3
 
     # --------------------------------------------------------
     # ToF / Vision / User-X Fusion
@@ -518,6 +555,12 @@ def main():
         # Motor3/4
         # ====================================================
         motor34 = Motor34Controller(motor)
+        preparation = MonitorArmPreparationController(
+            motor,
+            motor12,
+            motor34,
+            settings_path=MONITOR_ARM_SETTINGS_FILE,
+        )
 
         motor34.apply_control_config(
             {
@@ -674,11 +717,44 @@ def main():
 
         assert (resume_result["accepted"] is True)
 
+        # Timeout은 성공으로 처리하지 않고 Recovery 명령을 즉시 중단한다.
+        motor12.planner.recovery_started_at = (
+            time.monotonic()
+            - motor12.planner.working_start_timeout_sec
+            - 1.0
+        )
+        motor12_context["now"] = (now + 0.90)
+        timeout_state = motor12.update(motor12_context)
+        assert timeout_state["hold_reason"] == "RECOVERY_TIMEOUT"
+        assert timeout_state["recovery_active"] is False
+        assert "시간 초과" in timeout_state["last_error"]
+
+        preparation.begin()
+        preparation.connected = True
+        preparation.recovery_active = True
+        preparation.target = motor12.planner.working_command
+        preparation.target_pose = preparation.kinematics.forward(
+            preparation.target
+        )
+        preparation.target_reason = "working_start"
+        preparation_state = preparation.update(now + 0.91)
+        assert preparation_state["movement_active"] is False
+        assert preparation_state["working_start_completed"] is False
+        assert preparation_state["movement_status"] == "timeout"
+        assert preparation_state["motor12_hold_reason"] == "RECOVERY_TIMEOUT"
+        assert "시간 초과" in preparation_state["motor12_last_error"]
+        assert preparation_state["current_target_max_error_deg"] > 1.0
+
+        # 명시적으로 다시 요청한 뒤에만 정상 Recovery를 재개한다.
+        resume_result = motor12.resume_from_rest()
+        assert resume_result["accepted"] is True
+
         regular_before_recovery = len(fake.sync_moves)
 
         special_before_recovery = len(fake.special_sync_moves)
 
         recovery_complete = False
+        stabilizing_command_counts = []
         recovery_now = (now + 0.90)
 
         # Fake에서는 각 명령을 받으면 즉시 목표에 도달한다고
@@ -690,11 +766,18 @@ def main():
 
             recovery_now += 0.25
 
+            if state12["hold_reason"] == "RECOVERY_STABILIZING":
+                stabilizing_command_counts.append(
+                    len(fake.sync_moves) + len(fake.special_sync_moves)
+                )
+
             if (state12["hold_reason"] == "RECOVERY_COMPLETE"):
                 recovery_complete = True
                 break
 
         assert recovery_complete
+        assert len(stabilizing_command_counts) == 2
+        assert len(set(stabilizing_command_counts)) == 1
 
         # Calibration 밖에서는 특수 SyncWrite가 실제 사용돼야 한다.
         assert len(fake.special_sync_moves) > special_before_recovery
@@ -703,6 +786,9 @@ def main():
         assert len(fake.sync_moves) > regular_before_recovery
 
         assert (state12["recovery_active"] is False)
+        assert state12["recovery_stable_samples"] == 3
+        assert state12["recovery_required_stable_samples"] == 3
+        assert state12["recovery_arrival_tolerance_deg"] == 1.0
 
         assert abs(fake.angles["shoulder_lift"]) <= 0.25
 
