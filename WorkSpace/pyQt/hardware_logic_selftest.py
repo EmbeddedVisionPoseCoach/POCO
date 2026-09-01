@@ -3,6 +3,7 @@ import json
 import tempfile
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 from services.hardware_config_service import HardwareConfigService
 from services.hardware_constants import (
@@ -36,6 +37,8 @@ from services.motor_service import MotorService
 from services.motor12_controller import Motor12Controller
 from services.motor34_controller import Motor34Controller
 from services.tof_service import FixedToFSensorService
+from processes.pose_process_profile import pose_control_landmark_quality
+from processes.hardware_process import _read_joint_arrival
 
 
 WORKSPACE_DIR = Path(__file__).resolve().parents[1]
@@ -297,6 +300,28 @@ def main():
     # --------------------------------------------------------
     # ToF / Vision / User-X Fusion
     # --------------------------------------------------------
+    # 앉은 사용자의 골반이 책상에 가려져도 실제 제어에 필요한 양쪽
+    # 눈/어깨가 충분히 보이면 presence-valid여야 한다.
+    pose_landmarks = [
+        SimpleNamespace(visibility=0.95)
+        for _ in range(33)
+    ]
+    pose_landmarks[23].visibility = 0.10
+    pose_landmarks[24].visibility = 0.10
+    pose_results = SimpleNamespace(
+        pose_landmarks=SimpleNamespace(landmark=pose_landmarks)
+    )
+    landmark_quality, landmark_valid = pose_control_landmark_quality(pose_results)
+    assert landmark_valid is True
+    assert abs(landmark_quality - 0.95) < 1e-9
+
+    # 반대로 실제 거리 제어에 필요한 한쪽 눈이 임계값 아래이면
+    # 검출 자체가 있어도 안전 게이트에서는 미검출로 처리한다.
+    pose_landmarks[2].visibility = 0.59
+    landmark_quality, landmark_valid = pose_control_landmark_quality(pose_results)
+    assert landmark_valid is False
+    assert abs(landmark_quality - 0.59) < 1e-9
+
     # 실제 I2C 없이 fixed ToF로 Sensor -> user X 변환을 검증한다.
     tof_service = FixedToFSensorService(
         0.70
@@ -977,11 +1002,57 @@ def main():
         assert preparation_state["movement_status"] == "timeout"
         assert "도착하지 못했습니다" in preparation_state["last_error"]
 
+        # ====================================================
+        # Saved profile -> reconnect/Ping -> Motor1~4 initial pose
+        # ====================================================
+        # 프로필 선택 경로는 기존 ready 플래그만 믿지 않고 네 축을 다시
+        # 초기화한 뒤, 저장된 작업각을 한 번에 명령하고 실제각 도달을 확인한다.
+        preparation.end()
+        preparation.begin()
+        connected_state = preparation.connect_all()
+        assert connected_state["all_motors_ready"] is True
+
+        profile_targets = {
+            "shoulder_lift": 8.0,
+            "elbow_flex": -7.0,
+            "wrist_flex": 6.0,
+            "wrist_roll": -5.0,
+        }
+        result12 = motor12.move_to_working_smooth(
+            JointCommand(
+                profile_targets["shoulder_lift"],
+                profile_targets["elbow_flex"],
+            )
+        )
+        result34 = motor34.move_to_neutral(profile_targets)
+        assert result12["accepted"] is True
+        assert result34["accepted"] is True
+
+        actual, errors, reached, max_error = _read_joint_arrival(
+            motor,
+            profile_targets,
+            tolerance_deg=1.0,
+        )
+        assert reached is True
+        assert actual == profile_targets
+        assert all(error == 0.0 for error in errors.values())
+        assert max_error == 0.0
+
+        fake.angles["wrist_roll"] = profile_targets["wrist_roll"] + 1.1
+        _actual, _errors, reached, max_error = _read_joint_arrival(
+            motor,
+            profile_targets,
+            tolerance_deg=1.0,
+        )
+        assert reached is False
+        assert abs(max_error - 1.1) < 1e-9
+        preparation.end()
+
         motor.close()
 
     print(
     "Hardware logic self-test: PASS "
-    "(IMU / ToF-Vision / Motor1~4 / Rest-Recovery)"
+    "(IMU / ToF-Vision / Motor1~4 / Rest-Recovery / Profile-Auto-Ready)"
 )
 
 

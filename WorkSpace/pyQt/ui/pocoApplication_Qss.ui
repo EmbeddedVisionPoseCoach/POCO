@@ -127,6 +127,15 @@ QLabel#label_totalsec {
     font-weight: 800;
     padding: 5px;
 }
+QLabel#labelSensorMonitor {
+    background-color: #F8FAFC;
+    border: 1px solid #CBD5E1;
+    border-radius: 7px;
+    color: #334155;
+    font-size: 8pt;
+    font-weight: 700;
+    padding: 2px 5px;
+}
 QPushButton {
     background-color: #2563EB;
     color: white;
@@ -573,38 +582,38 @@ QLabel#settingsHelpText {
               <property name="minimumSize">
                <size>
                 <width>0</width>
-                <height>96</height>
+                <height>105</height>
                </size>
               </property>
               <property name="maximumSize">
                <size>
                 <width>16777215</width>
-                <height>110</height>
+                <height>125</height>
                </size>
               </property>
               <layout class="QVBoxLayout" name="infoOuterLayout">
                <property name="spacing">
-                <number>6</number>
+                <number>3</number>
                </property>
                <property name="leftMargin">
-                <number>9</number>
+                <number>5</number>
                </property>
                <property name="topMargin">
-                <number>7</number>
+                <number>4</number>
                </property>
                <property name="rightMargin">
-                <number>9</number>
+                <number>5</number>
                </property>
                <property name="bottomMargin">
-                <number>9</number>
+                <number>4</number>
                </property>
                <item>
                 <widget class="QLabel" name="sectionTitleInfo">
                  <property name="maximumSize">
-                  <size>
-                   <width>16777215</width>
-                   <height>18</height>
-                  </size>
+                   <size>
+                    <width>16777215</width>
+                    <height>16</height>
+                   </size>
                  </property>
                  <property name="text">
                   <string>현재 상태</string>
@@ -614,14 +623,14 @@ QLabel#settingsHelpText {
                <item>
                 <layout class="QGridLayout" name="infoGrid">
                  <property name="spacing">
-                  <number>7</number>
+                  <number>3</number>
                  </property>
                  <item row="0" column="0" colspan="2">
                   <widget class="QLabel" name="label_CurrentPose">
                    <property name="minimumSize">
                     <size>
                      <width>0</width>
-                     <height>52</height>
+                     <height>38</height>
                     </size>
                    </property>
                    <property name="text">
@@ -638,7 +647,7 @@ QLabel#settingsHelpText {
                    <property name="minimumSize">
                     <size>
                      <width>0</width>
-                     <height>52</height>
+                     <height>38</height>
                     </size>
                    </property>
                    <property name="text">
@@ -647,6 +656,26 @@ QLabel#settingsHelpText {
                    </property>
                    <property name="alignment">
                     <set>Qt::AlignCenter</set>
+                   </property>
+                  </widget>
+                 </item>
+                 <item row="1" column="0" colspan="3">
+                  <widget class="QLabel" name="labelSensorMonitor">
+                   <property name="minimumSize">
+                    <size>
+                     <width>0</width>
+                     <height>34</height>
+                    </size>
+                   </property>
+                   <property name="text">
+                    <string>ToF -- | Pose -- | User X --
+IMU X -- / Y -- | Safety --</string>
+                   </property>
+                   <property name="alignment">
+                    <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignVCenter</set>
+                   </property>
+                   <property name="wordWrap">
+                    <bool>true</bool>
                    </property>
                   </widget>
                  </item>

@@ -148,6 +148,10 @@ class MainWindow(QMainWindow):
         self.set_label_text("label_Rank", "불안정 자세 TOP 3\n\n1위  -\n2위  -\n3위  -")
         self.set_label_text(["label_totalsec", "label_totalset"], "00:00:00")
         self.set_label_text("label_CurrentPose", "현재 자세\n-")
+        self.set_label_text(
+            "labelSensorMonitor",
+            "ToF -- | Pose -- | User X --\nIMU X -- / Y -- | Safety --",
+        )
         # self.set_label_text("label_CurrentFatigue", "현재 피로도\n-")
 
     # ---------------------------------------------------------
@@ -251,12 +255,86 @@ class MainWindow(QMainWindow):
             return
         self.latest_hardware_state = state
         self.hardware_state_store.update(state)
+        self.update_sensor_monitor(state)
         safety = state.get("monitor_arm", {}).get("safety", {}) if isinstance(state, dict) else {}
         if str(state.get("main_mode", "")).upper() == "MEASURING" and safety:
-            message = safety.get("tof_alert") or safety.get("reason")
+            message = (
+                safety.get("tof_alert")
+                or safety.get("landmark_alert")
+                or safety.get("reason")
+            )
             if message and message != self._last_safety_message:
                 self._last_safety_message = message
                 self.set_status(str(message))
+
+    @staticmethod
+    def _sensor_number(value, digits=2, scale=1.0, suffix=""):
+        try:
+            return f"{float(value) * float(scale):.{digits}f}{suffix}"
+        except (TypeError, ValueError):
+            return "--"
+
+    def update_sensor_monitor(self, state):
+        """Render compact live ToF/Pose/Fusion/IMU/safety diagnostics."""
+        label = getattr(self, "labelSensorMonitor", None)
+        if label is None or not isinstance(state, dict):
+            return
+
+        tof = state.get("tof", {}) if isinstance(state.get("tof"), dict) else {}
+        imu = state.get("imu", {}) if isinstance(state.get("imu"), dict) else {}
+        monitor_input = (
+            state.get("monitor_arm_input", {})
+            if isinstance(state.get("monitor_arm_input"), dict)
+            else {}
+        )
+        monitor_arm = (
+            state.get("monitor_arm", {})
+            if isinstance(state.get("monitor_arm"), dict)
+            else {}
+        )
+        safety = (
+            monitor_arm.get("safety", {})
+            if isinstance(monitor_arm.get("safety"), dict)
+            else {}
+        )
+
+        tof_ok = bool(safety.get("tof_presence_valid", False))
+        landmark_ok = bool(safety.get("landmark_presence_valid", False))
+        imu_ok = bool(imu.get("available", False) and imu.get("calibrated", False))
+        distance = self._sensor_number(
+            tof.get("filtered_distance_m"), digits=1, scale=100.0, suffix="cm"
+        )
+        quality = self._sensor_number(state.get("pose_landmark_quality"), digits=2)
+        quality_min = self._sensor_number(
+            state.get("pose_landmark_min_visibility"), digits=2
+        )
+        user_x = self._sensor_number(
+            monitor_input.get("user_x_m"), digits=1, scale=100.0, suffix="cm"
+        )
+        fusion_mode = str(monitor_input.get("fusion_mode", "--"))
+        imu_x = self._sensor_number(imu.get("imu_x_error_g"), digits=3, suffix="g")
+        imu_y = self._sensor_number(imu.get("imu_y_error_g"), digits=3, suffix="g")
+        safety_state = str(safety.get("state", "--"))
+
+        label.setText(
+            f"ToF {distance} {'OK' if tof_ok else 'NG'} | "
+            f"Pose {quality}/{quality_min} {'OK' if landmark_ok else 'NG'} | "
+            f"User X {user_x} {fusion_mode}\n"
+            f"IMU X {imu_x} / Y {imu_y} {'OK' if imu_ok else 'NG'} | "
+            f"Safety {safety_state}"
+        )
+
+        if tof_ok and landmark_ok and imu_ok:
+            background, border, color = "#ECFDF5", "#86EFAC", "#166534"
+        elif tof_ok or landmark_ok or imu_ok:
+            background, border, color = "#FFFBEB", "#FCD34D", "#92400E"
+        else:
+            background, border, color = "#FEF2F2", "#FCA5A5", "#991B1B"
+        label.setStyleSheet(
+            f"background-color:{background};border:1px solid {border};"
+            f"border-radius:7px;color:{color};font-size:8pt;"
+            "font-weight:700;padding:2px 5px;"
+        )
 
     def on_hardware_event_changed(self, event):
         """Hardware Process -> Main 순서 보장 Event/ACK 수신 지점."""
@@ -282,13 +360,19 @@ class MainWindow(QMainWindow):
                     self.latest_hardware_config = config_data
             if event_type == "USER_PROFILE_APPLIED":
                 if event.get("success"):
-                    self.active_profile_slot = self._pending_profile_slot
+                    self.active_profile_slot = event.get("slot", self._pending_profile_slot)
                     self.monitor_arm_preparation_ready = True
                     self.btnCamOn.setEnabled(True)
-                    self.set_status("프로필 적용 완료. 측정 시작 버튼을 눌러주세요.")
+                    self.set_status("프로필 적용 및 작업 초기위치 이동 완료. 측정 시작 버튼을 눌러주세요.")
                 else:
                     QMessageBox.warning(self, "프로필 적용 실패", str(event.get("message", "")))
+                    self.set_status(str(event.get("message", "프로필 적용에 실패했습니다.")))
+                self.btnCalibration.setEnabled(True)
+                self.btnManualArm.setEnabled(True)
+                self.btnUserProfile.setEnabled(True)
                 self._pending_profile_slot = None
+            elif event_type == "USER_PROFILE_APPLY_STARTED":
+                self.set_status(str(event.get("message", "작업 초기위치로 이동하고 있습니다.")))
             elif event_type == "MEASUREMENT_STOP_AND_REST_ACK" and self._measurement_stop_pending:
                 if event.get("success") is False:
                     QMessageBox.warning(self, "종료 자세 이동", str(event.get("message", "")))
@@ -384,11 +468,18 @@ class MainWindow(QMainWindow):
             self.ensure_camera_worker()
             self._pending_profile_slot = slot
             self.btnCamOn.setEnabled(False)
+            self.btnCalibration.setEnabled(False)
+            self.btnCalibrationStart.setEnabled(False)
+            self.btnManualArm.setEnabled(False)
+            self.btnUserProfile.setEnabled(False)
             if not self.send_hardware_command({"type": "APPLY_USER_PROFILE", "slot": slot, "profile": bundle}):
                 raise RuntimeError("하드웨어 프로세스에 프로필을 전달하지 못했습니다.")
-            self.set_status("사용자 프로필을 적용하는 중입니다.")
+            self.set_status("프로필 복원과 모터 1~4 연결 확인을 시작합니다.")
         except Exception as error:
             self._pending_profile_slot = None
+            self.btnCalibration.setEnabled(True)
+            self.btnManualArm.setEnabled(True)
+            self.btnUserProfile.setEnabled(True)
             QMessageBox.warning(self, "프로필 불러오기 실패", str(error))
 
     def on_manual_arm_clicked(self):

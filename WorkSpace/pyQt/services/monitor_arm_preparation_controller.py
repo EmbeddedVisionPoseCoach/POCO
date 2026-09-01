@@ -157,8 +157,10 @@ class MonitorArmPreparationController:
     def connect_all(self) -> dict[str, Any]:
         if not self.motor.available and not self.motor.open():
             raise RuntimeError(self.motor.last_error or "모터 포트 연결 실패")
-        motor12_ok = self.motor12.ready or self.motor12.initialize()
-        motor34_ok = self.motor34.ready or self.motor34.initialize()
+        # 시작 때 얻은 ready 값만 재사용하지 않고 버튼/프로필 적용 시점의
+        # Servo1~4를 다시 Ping해 실제 연결 상태를 확인한다.
+        motor12_ok = self.motor12.initialize()
+        motor34_ok = self.motor34.initialize()
         if not motor12_ok or not motor34_ok:
             errors = []
             if not motor12_ok:

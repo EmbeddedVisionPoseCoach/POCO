@@ -44,6 +44,8 @@ HW_MONITOR_ARM_PREPARING = "MONITOR_ARM_PREPARING"
 HW_POSE_CALIBRATING = "POSE_CALIBRATING"
 HW_MEASURING = "MEASURING"
 
+PROFILE_APPLY_POLL_INTERVAL_SEC = 0.20
+
 
 def _event_type(message):
     if isinstance(message, dict):
@@ -77,6 +79,29 @@ def _extract_pose_landmark_state(pose_state):
     )
     landmarks = pose_state.get("landmarks") if valid else None
     return frame_id, landmarks, valid
+
+
+def _read_joint_arrival(motor_service, targets, tolerance_deg):
+    """Read every requested joint and decide whether all reached the target."""
+    actual = {
+        joint: motor_service.get_joint_angle(joint)
+        for joint in targets
+    }
+    errors = {
+        joint: (
+            None
+            if actual[joint] is None
+            else abs(float(actual[joint]) - float(target))
+        )
+        for joint, target in targets.items()
+    }
+    reached = all(
+        error is not None and error <= float(tolerance_deg)
+        for error in errors.values()
+    )
+    finite_errors = [error for error in errors.values() if error is not None]
+    max_error = max(finite_errors) if finite_errors else None
+    return actual, errors, reached, max_error
 
 def _load_monitor_arm_settings():
     """Motor1/2 모니터암의 고정 프로젝트 설정을 한 번 읽는다.
@@ -269,6 +294,21 @@ def run_hardware_process(
     stop_rest_started_at = None
     stop_rest_last_check_at = 0.0
     stop_rest_targets = {}
+    profile_apply_pending = False
+    profile_apply_started_at = None
+    profile_apply_last_check_at = 0.0
+    profile_apply_targets = {}
+    profile_apply_slot = None
+    profile_apply_stable_samples = 0
+    profile_apply_tolerance_deg = float(
+        monitor_arm_preparation.arrival_tolerance_deg
+    )
+    profile_apply_required_samples = int(
+        monitor_arm_preparation.arrival_stable_samples
+    )
+    profile_apply_timeout_sec = float(
+        monitor_arm_preparation.movement_timeout_sec
+    )
 
     # JSON에는 사용자가 바꿀 튜닝값만 있다.
     imu.apply_control_config(control["imu"], control["pid"])
@@ -526,6 +566,15 @@ def run_hardware_process(
                     continue
 
                 if event_type == "APPLY_USER_PROFILE":
+                    if profile_apply_pending:
+                        _put_hardware_event(
+                            hw_to_main_event_queue,
+                            "USER_PROFILE_APPLIED",
+                            success=False,
+                            message="다른 사용자 프로필을 적용하는 중입니다.",
+                            slot=event.get("slot"),
+                        )
+                        continue
                     try:
                         profile = dict(event.get("profile") or {})
                         calibration_state = monitor_arm_calibration.restore(
@@ -541,16 +590,76 @@ def run_hardware_process(
                             calibration_state["eye_gap_baseline_px"],
                             calibration_state["user_monitor_distance_baseline_m"],
                         )
-                        workflow_state = HW_READY_FOR_POSE_CALIBRATION
+
+                        required_joints = (
+                            "shoulder_lift",
+                            "elbow_flex",
+                            "wrist_flex",
+                            "wrist_roll",
+                        )
+                        missing_joints = [
+                            joint for joint in required_joints
+                            if active_profile_motor_angles.get(joint) is None
+                        ]
+                        if missing_joints:
+                            raise ValueError(
+                                "프로필에 저장된 모터 초기각이 없습니다: "
+                                + ", ".join(missing_joints)
+                            )
+                        profile_apply_targets = {
+                            joint: float(active_profile_motor_angles[joint])
+                            for joint in required_joints
+                        }
+
+                        # 프로필 선택 시 별도 준비 창 없이 Servo1~4의 현재 연결,
+                        # Calibration, Ping을 확인한 뒤 저장된 작업 초기자세로 이동한다.
+                        monitor_arm_preparation.end()
+                        monitor_arm_preparation.begin()
+                        preparation_state = monitor_arm_preparation.connect_all()
+                        motor_bus_opened = bool(motor_service.available)
+                        motor12_opened = bool(motor12.ready)
+                        motor34_opened = bool(motor34.ready)
+
+                        target12 = JointCommand(
+                            profile_apply_targets["shoulder_lift"],
+                            profile_apply_targets["elbow_flex"],
+                        )
+                        result12 = motor12.move_to_working_smooth(target12)
+                        result34 = motor34.move_to_neutral(profile_apply_targets)
+                        if not result12.get("accepted") or not result34.get("accepted"):
+                            raise RuntimeError(
+                                "작업 초기자세 이동 명령 실패: "
+                                f"M1/2={result12} / M3/4={result34}"
+                            )
+
+                        profile_apply_pending = True
+                        profile_apply_started_at = time.monotonic()
+                        profile_apply_last_check_at = 0.0
+                        profile_apply_slot = event.get("slot")
+                        profile_apply_stable_samples = 0
+                        workflow_state = HW_MONITOR_ARM_PREPARING
                         safety_supervisor.reset()
                         _put_hardware_event(
                             hw_to_main_event_queue,
-                            "USER_PROFILE_APPLIED",
+                            "USER_PROFILE_APPLY_STARTED",
                             success=True,
-                            message="사용자 프로필의 비전·ToF·IMU·모터 기준값을 적용했습니다.",
-                            slot=event.get("slot"),
+                            message=(
+                                "Servo 1~4 연결 확인 완료. 저장된 작업 초기위치로 "
+                                "이동하고 있습니다."
+                            ),
+                            slot=profile_apply_slot,
+                            target_angles_deg=dict(profile_apply_targets),
+                            preparation=preparation_state,
                         )
                     except Exception as error:
+                        profile_apply_pending = False
+                        profile_apply_started_at = None
+                        profile_apply_last_check_at = 0.0
+                        profile_apply_targets = {}
+                        profile_apply_slot = None
+                        profile_apply_stable_samples = 0
+                        monitor_arm_preparation.end()
+                        workflow_state = HW_IDLE
                         _put_hardware_event(
                             hw_to_main_event_queue,
                             "USER_PROFILE_APPLIED",
@@ -1435,11 +1544,38 @@ def run_hardware_process(
                 latest_safety_state = safety_supervisor.snapshot(now)
             latest_safety_state["tof_presence_valid"] = tof_presence_valid
             latest_safety_state["landmark_presence_valid"] = latest_pose_landmark_valid
+            landmark_quality = (
+                latest_pose_state.get("landmark_quality")
+                if isinstance(latest_pose_state, dict)
+                else None
+            )
+            landmark_min_visibility = (
+                latest_pose_state.get("landmark_min_visibility")
+                if isinstance(latest_pose_state, dict)
+                else None
+            )
             latest_safety_state["tof_alert"] = (
                 None
                 if tof_presence_valid
                 else f"ToF 거리 미검출/범위 이탈 ({presence_min_m:.2f}~{presence_max_m:.2f}m 필요)"
             )
+            if latest_pose_landmark_valid:
+                latest_safety_state["landmark_alert"] = None
+            elif not isinstance(latest_pose_state, dict):
+                latest_safety_state["landmark_alert"] = "Pose 상태가 수신되지 않았습니다."
+            elif not latest_pose_state.get("landmark_valid", False):
+                latest_safety_state["landmark_alert"] = "Pose 랜드마크가 검출되지 않았습니다."
+            else:
+                try:
+                    quality_text = f"{float(landmark_quality):.2f}"
+                    threshold_text = f"{float(landmark_min_visibility):.2f}"
+                except (TypeError, ValueError):
+                    quality_text = "--"
+                    threshold_text = "0.60"
+                latest_safety_state["landmark_alert"] = (
+                    "눈/어깨 랜드마크 신뢰도 부족 "
+                    f"({quality_text} < {threshold_text})"
+                )
 
             # ==================================================
             # F. Motor control context
@@ -1447,17 +1583,68 @@ def run_hardware_process(
             imu_ready = bool(imu.available and imu.calibrated and not imu.calibrating)
             latest_preparation_state = monitor_arm_preparation.update(now)
 
+            # 프로필은 네 모터의 실제각이 연속 샘플 동안 목표 범위에 들어온 뒤에만
+            # 적용 완료로 알린다. 명령 수락만으로 측정 버튼을 활성화하지 않는다.
+            if (
+                profile_apply_pending
+                and now - profile_apply_last_check_at
+                >= PROFILE_APPLY_POLL_INTERVAL_SEC
+            ):
+                profile_apply_last_check_at = now
+                actual, errors, reached, max_error = _read_joint_arrival(
+                    motor_service,
+                    profile_apply_targets,
+                    profile_apply_tolerance_deg,
+                )
+                if reached:
+                    profile_apply_stable_samples += 1
+                else:
+                    profile_apply_stable_samples = 0
+                stable = bool(
+                    profile_apply_stable_samples >= profile_apply_required_samples
+                )
+                timed_out = bool(
+                    profile_apply_started_at is not None
+                    and now - profile_apply_started_at >= profile_apply_timeout_sec
+                )
+                if stable or timed_out:
+                    completed_slot = profile_apply_slot
+                    profile_apply_pending = False
+                    profile_apply_started_at = None
+                    profile_apply_last_check_at = 0.0
+                    profile_apply_slot = None
+                    profile_apply_stable_samples = 0
+                    monitor_arm_preparation.working_start_completed = stable
+                    monitor_arm_preparation.end()
+                    workflow_state = (
+                        HW_READY_FOR_POSE_CALIBRATION if stable else HW_IDLE
+                    )
+                    _put_hardware_event(
+                        hw_to_main_event_queue,
+                        "USER_PROFILE_APPLIED",
+                        success=stable,
+                        message=(
+                            "프로필 적용과 Servo 1~4 작업 초기위치 이동을 완료했습니다."
+                            if stable else
+                            f"{profile_apply_timeout_sec:.1f}초 내 작업 초기위치에 "
+                            "도착하지 못했습니다. 모터 연결과 걸림 여부를 확인해주세요."
+                        ),
+                        slot=completed_slot,
+                        actual_angles_deg=actual,
+                        target_angles_deg=dict(profile_apply_targets),
+                        joint_errors_deg=errors,
+                        max_error_deg=max_error,
+                        arrival_tolerance_deg=profile_apply_tolerance_deg,
+                    )
+                    profile_apply_targets = {}
+
             # 종료 버튼은 네 모터가 목표에 실제 도착한 뒤에만 카메라 종료 ACK를 보낸다.
             if stop_rest_pending and now - stop_rest_last_check_at >= 0.20:
                 stop_rest_last_check_at = now
-                actual = {
-                    joint: motor_service.get_joint_angle(joint)
-                    for joint in stop_rest_targets
-                }
-                reached = all(
-                    actual[joint] is not None
-                    and abs(float(actual[joint]) - target) <= 2.0
-                    for joint, target in stop_rest_targets.items()
+                actual, _errors, reached, _max_error = _read_joint_arrival(
+                    motor_service,
+                    stop_rest_targets,
+                    2.0,
                 )
                 timed_out = bool(
                     stop_rest_started_at is not None
@@ -1725,6 +1912,16 @@ def run_hardware_process(
                     "pose_state_received": latest_pose_state is not None if enable_pose else False,
                     "pose_frame_id": latest_pose_frame_id if enable_pose else None,
                     "pose_landmark_valid": latest_pose_landmark_valid if enable_pose else False,
+                    "pose_landmark_quality": (
+                        latest_pose_state.get("landmark_quality")
+                        if enable_pose and isinstance(latest_pose_state, dict)
+                        else None
+                    ),
+                    "pose_landmark_min_visibility": (
+                        latest_pose_state.get("landmark_min_visibility")
+                        if enable_pose and isinstance(latest_pose_state, dict)
+                        else None
+                    ),
                     "pose_landmark_count": (
                         len(latest_pose_landmarks)
                         if enable_pose and latest_pose_landmarks is not None

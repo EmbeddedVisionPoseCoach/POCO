@@ -44,7 +44,11 @@ PROFILE_INTERVAL_SEC = 2.0
 LEFT_EYE_INDEX = 2
 RIGHT_EYE_INDEX = 5
 MINIMUM_EYE_GAP_PX = 5.0
-CONTROL_LANDMARK_INDICES = (2, 5, 11, 12, 23, 24)
+# Monitor-arm presence/distance control uses both eyes and shoulders. Requiring
+# both hips as well made a normally seated user "missing" whenever the desk or
+# the bottom of the camera frame hid the pelvis, even though none of the active
+# distance/posture features needs hip visibility.
+CONTROL_LANDMARK_INDICES = (2, 5, 11, 12)
 CONTROL_LANDMARK_MIN_VISIBILITY = 0.60
 
 
@@ -166,7 +170,7 @@ def serialize_pose_landmarks(results):
 
 
 def pose_control_landmark_quality(results):
-    """Return minimum visibility for eyes/shoulders/hips used by arm control."""
+    """Return minimum visibility for the eyes/shoulders used by arm control."""
     if results is None or not results.pose_landmarks:
         return 0.0, False
     landmarks = results.pose_landmarks.landmark
