@@ -148,7 +148,7 @@ class MainWindow(QMainWindow):
         self.set_label_text("label_Rank", "불안정 자세 TOP 3\n\n1위  -\n2위  -\n3위  -")
         self.set_label_text(["label_totalsec", "label_totalset"], "00:00:00")
         self.set_label_text("label_CurrentPose", "현재 자세\n-")
-        self.set_label_text("label_CurrentFatigue", "현재 피로도\n-")
+        # self.set_label_text("label_CurrentFatigue", "현재 피로도\n-")
 
     # ---------------------------------------------------------
     # Path
@@ -564,8 +564,8 @@ class MainWindow(QMainWindow):
             return
         posture_type = result.get("posture_type", "-")
         confidence = result.get("confidence", 0.0)
-        fatigue_label = result.get("fatigue_label", "Normal")
-        fatigue_probability = result.get("fatigue_probability", 0.0)
+        # fatigue_label = result.get("fatigue_label", "Normal")
+        # fatigue_probability = result.get("fatigue_probability", 0.0)
         elapsed_sec = result.get("elapsed_sec", 0)
         rank_text = result.get("rank_text", self.get_empty_rank_text())
 
@@ -581,10 +581,10 @@ class MainWindow(QMainWindow):
             f"현재 자세\n{posture_type}\n{confidence * 100:.1f}%"
         )
 
-        self.set_label_text(
-            "label_CurrentFatigue",
-            f"현재 피로도\n{fatigue_label}\n{fatigue_probability * 100:.1f}%"
-        )
+        # self.set_label_text(
+        #     "label_CurrentFatigue",
+        #     f"현재 피로도\n{fatigue_label}\n{fatigue_probability * 100:.1f}%"
+        # )
 
     def get_empty_rank_text(self):
         return (
@@ -798,10 +798,10 @@ class MainWindow(QMainWindow):
             settings.bad_posture_duration_sec
         )
 
-        self.set_spinbox_value(
-            "spinFatigueDurationSec",
-            settings.fatigue_duration_sec
-        )
+        # self.set_spinbox_value(
+        #     "spinFatigueDurationSec",
+        #     settings.fatigue_duration_sec
+        # )
 
 
         ## 추가
@@ -812,10 +812,10 @@ class MainWindow(QMainWindow):
         )
 
         # fatigue_Hardware_count 졸음 LED/부저 반복 횟수
-        self.set_spinbox_value(
-            "spinDrowsyAlertCount",
-            settings.fatigue_Hardware_count
-        )
+        # self.set_spinbox_value(
+        #     "spinDrowsyAlertCount",
+        #     settings.fatigue_Hardware_count
+        # )
 
         # posture_Strong_limit 자세 강함 알림 횟수
         self.set_spinbox_value(
@@ -824,10 +824,10 @@ class MainWindow(QMainWindow):
         )
 
         # fatigue_Strong_limit 졸음 강함 알림 횟수
-        self.set_spinbox_value(
-            "spinDrowsyStrongLimit",
-            settings.fatigue_Strong_limit
-        )
+        # self.set_spinbox_value(
+        #     "spinDrowsyStrongLimit",
+        #     settings.fatigue_Strong_limit
+        # )
 
 
         # strong_alert_cooldown_min 강한 알림 후 쿨타임
@@ -856,28 +856,28 @@ class MainWindow(QMainWindow):
                 "spinBadPostureDurationSec",
                 default_value=5
             ),
-            fatigue_duration_sec=self.get_spinbox_value(
-                "spinFatigueDurationSec",
-                default_value=5
-            ),
+            # fatigue_duration_sec=self.get_spinbox_value(
+            #     "spinFatigueDurationSec",
+            #     default_value=5
+            # ),
 
             ## 추가
             posture_Hardware_count=self.get_spinbox_value(
                 "spinPostureAlertCount",
                 default_value=5
             ),
-            fatigue_Hardware_count=self.get_spinbox_value(
-                "spinDrowsyAlertCount",
-                default_value=3
-            ),
+            # fatigue_Hardware_count=self.get_spinbox_value(
+            #     "spinDrowsyAlertCount",
+            #     default_value=3
+            # ),
             posture_Strong_limit=self.get_spinbox_value(
                 "spinPostureStrongLimit",
                 default_value=3
             ),
-            fatigue_Strong_limit=self.get_spinbox_value(
-                "spinDrowsyStrongLimit",
-                default_value=2
-            ),
+            # fatigue_Strong_limit=self.get_spinbox_value(
+            #     "spinDrowsyStrongLimit",
+            #     default_value=2
+            # ),
             strong_alert_cooldown_min=self.get_spinbox_value(
                 "spinStrongAlertCooldownMin",
                 default_value=5
@@ -933,12 +933,12 @@ class MainWindow(QMainWindow):
 
         spinbox_names = [
             "spinBadPostureDurationSec",
-            "spinFatigueDurationSec",
+            # "spinFatigueDurationSec",
             "spinRepeatAlarmSec",
             "spinPostureAlertCount",
-            "spinDrowsyAlertCount",
+            # "spinDrowsyAlertCount",
             "spinPostureStrongLimit",
-            "spinDrowsyStrongLimit",
+            # "spinDrowsyStrongLimit",
             "spinStrongAlertCooldownMin"
         ]
 
