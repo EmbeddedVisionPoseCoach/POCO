@@ -417,6 +417,23 @@ class VisionResultWorker(QThread):
                     # 한 Process 결과가 너무 오래된 경우 stale 값을 섞지 않는다.
                     return
 
+
+        # 피로도 기능은 삭제하지 않는다.
+        # 현재 POSE_ONLY 모드에서는 Streamlit 스키마와의 호환을 위해
+        # Normal / 0.0을 기본값으로 저장한다.
+        # Face Process를 다시 켜면 기존 FACE_RESULT 값을 그대로 사용한다.
+        fatigue_label = (
+            face.get("fatigue_label", "Normal")
+            if self.face_enabled
+            else "Normal"
+        )
+
+        fatigue_probability = (
+            face.get("fatigue_probability", 0.0)
+            if self.face_enabled
+            else 0.0
+        )
+
         pose_frame_id = pose.get("frame_id")
         face_frame_id = face.get("frame_id")
         frame_ids = [value for value in (pose_frame_id, face_frame_id) if value is not None]
@@ -426,8 +443,8 @@ class VisionResultWorker(QThread):
             frame_id=frame_id,
             posture_type=pose.get("posture_type", "-"),
             confidence=pose.get("confidence", 0.0),
-            fatigue_label=face.get("fatigue_label", "-"),
-            fatigue_probability=face.get("fatigue_probability", 0.0),
+            fatigue_label=fatigue_label,
+            fatigue_probability=fatigue_probability,
             pose_frame_id=pose_frame_id,
         )
 
@@ -451,18 +468,19 @@ class VisionResultWorker(QThread):
             if posture_type not in ("-", normal_label):
                 self.posture_counter[posture_type] += 1
 
-        now = time.monotonic()
-        if now - self.last_ui_emit_time < self.ui_emit_interval:
-            return
-
-        self.last_ui_emit_time = now
-
         if self.logger is not None:
             self.logger.save({
                 "posture_type": posture_type,
                 "fatigue_label": fatigue_label,
                 "fatigue_probability": float(fatigue_probability),
             })
+
+
+        now = time.monotonic()
+        if now - self.last_ui_emit_time < self.ui_emit_interval:
+            return
+
+        self.last_ui_emit_time = now
 
         self.result_changed.emit({
             "posture_type": posture_type,

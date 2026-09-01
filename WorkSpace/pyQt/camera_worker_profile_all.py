@@ -596,7 +596,7 @@ class CameraWorker(QThread):
         # 각 Process가 저장된 baseline을 실제로 정상 로드했는지 ACK를 받은 뒤
         # 측정 시작 성공을 Main UI에 알린다.
         self.result_worker.reset_measurement_start()
-        self.result_worker.start_measurement_session()
+        # self.result_worker.start_measurement_session()
         self.vision_manager.start_measurement()
         self.status_changed.emit("저장된 Calibration 기준값을 불러오는 중입니다.")
 
@@ -609,6 +609,10 @@ class CameraWorker(QThread):
             self.measurement_started.emit(False, message)
             self.status_changed.emit(message)
             return
+
+        # Pose Process의 모델 / Scaler / Baseline 준비가 끝난 시점부터
+        # 실제 측정 시간을 기록한다.
+        self.result_worker.start_measurement_session()
 
         # 모델/Scaler 로딩 ACK를 받은 뒤에만 Ring frame 공급을 재개한다.
         # 측정 시작 중 모델 로딩 때문에 Ring이 4개 가득 차는 overrun을 방지한다.
