@@ -36,7 +36,8 @@
     "vision_filter_alpha": 0.25
   },
   "control": {
-    "command_hz": 5.0,
+    "command_hz": 20.0,
+    "trajectory_reference_hz": 5.0,
     "speed": 20,
     "acc": 5,
     "manual_test_speed_cap": 100,
@@ -48,6 +49,9 @@
     "working_start_arrival_tolerance_deg": 1.0,
     "working_start_stable_samples": 3,
     "working_start_timeout_sec": 25.0,
+    "preparation_arrival_tolerance_deg": 1.0,
+    "preparation_arrival_stable_samples": 3,
+    "preparation_movement_timeout_sec": 25.0,
     "pose_speed": 800,
     "pose_acc": 20,
     "pose_speed_mode": "adaptive",

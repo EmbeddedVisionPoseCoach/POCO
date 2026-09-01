@@ -52,6 +52,8 @@ class MonitorArmPreparationController:
         self.last_telemetry_at = 0.0
         self.last_error: str | None = None
         self.movement_status = "idle"
+        self.movement_started_at: float | None = None
+        self.arrival_stable_sample_count = 0
         self.working_start_max_error_deg: float | None = None
         self.motor12_hold_reason: str | None = None
         self.motor12_last_error: str | None = None
@@ -71,7 +73,7 @@ class MonitorArmPreparationController:
         }
 
         control = self.settings.get("control", {})
-        self.command_hz = max(1.0, float(control.get("command_hz", 5.0)))
+        self.command_hz = max(1.0, float(control.get("command_hz", 20.0)))
         self.command_interval = 1.0 / self.command_hz
         self.maximum_speed = min(
             1000,
@@ -87,7 +89,6 @@ class MonitorArmPreparationController:
         )
         self.speed_mode = str(control.get("vertical_ik_speed_mode", "adaptive"))
         self.acc = min(254, max(0, int(control.get("vertical_ik_acc", 30))))
-        self.arrival_tolerance_deg = 0.5
         planner = getattr(self.motor12, "planner", None)
         self.working_start_arrival_tolerance_deg = (
             planner.working_start_arrival_tolerance_deg if planner else 1.0
@@ -98,11 +99,44 @@ class MonitorArmPreparationController:
         self.working_start_timeout_sec = (
             planner.working_start_timeout_sec if planner else 25.0
         )
+        # Smooth working/manual IK moves are sent as one synchronized Servo goal,
+        # so the Planner recovery counter is not active for these movements.
+        # Use the same proven arrival criteria locally instead of the old 0.5°
+        # one-sample check, which could leave the preparation UI moving forever.
+        self.arrival_tolerance_deg = max(
+            0.1,
+            float(
+                control.get(
+                    "preparation_arrival_tolerance_deg",
+                    self.working_start_arrival_tolerance_deg,
+                )
+            ),
+        )
+        self.arrival_stable_samples = max(
+            1,
+            int(
+                control.get(
+                    "preparation_arrival_stable_samples",
+                    self.working_start_stable_samples,
+                )
+            ),
+        )
+        self.movement_timeout_sec = max(
+            0.1,
+            float(
+                control.get(
+                    "preparation_movement_timeout_sec",
+                    self.working_start_timeout_sec,
+                )
+            ),
+        )
 
     def begin(self) -> None:
         self.active = True
         self.last_error = None
         self.movement_status = "idle"
+        self.movement_started_at = None
+        self.arrival_stable_sample_count = 0
         self.working_start_max_error_deg = None
         self.motor12_hold_reason = None
         self.motor12_last_error = None
@@ -111,6 +145,8 @@ class MonitorArmPreparationController:
         self.active = False
         self.recovery_active = False
         self.target_reason = None
+        self.movement_started_at = None
+        self.arrival_stable_sample_count = 0
         if (
             self._normal_working_command is not None
             and getattr(self.motor12, "planner", None) is not None
@@ -166,12 +202,50 @@ class MonitorArmPreparationController:
                 if (
                     not self.recovery_active
                     and self.target_reason in {"manual_ik", "rest", "working_start"}
-                    and error <= self.arrival_tolerance_deg
                 ):
-                    if self.target_reason == "working_start":
-                        self.working_start_completed = True
-                    self.target_reason = None
-                    self.movement_status = "completed"
+                    movement_reason = self.target_reason
+                    if error <= self.arrival_tolerance_deg:
+                        self.arrival_stable_sample_count += 1
+                        if (
+                            self.arrival_stable_sample_count
+                            >= self.arrival_stable_samples
+                        ):
+                            if movement_reason == "working_start":
+                                self.working_start_completed = True
+                            self.target_reason = None
+                            self.movement_started_at = None
+                            self.movement_status = "completed"
+                        else:
+                            self.movement_status = "stabilizing"
+                    else:
+                        self.arrival_stable_sample_count = 0
+                        self.movement_status = "moving"
+
+                    if (
+                        self.target_reason is not None
+                        and self.movement_started_at is not None
+                        and now - self.movement_started_at
+                        >= self.movement_timeout_sec
+                    ):
+                        if movement_reason == "working_start":
+                            self.working_start_completed = False
+                        self.last_error = (
+                            f"{self.movement_timeout_sec:.1f}초 내 목표에 "
+                            f"도착하지 못했습니다. 현재 최대 관절 오차 "
+                            f"{error:.2f}° (허용 {self.arrival_tolerance_deg:.2f}°)."
+                        )
+                        self.target_reason = None
+                        self.movement_started_at = None
+                        self.arrival_stable_sample_count = 0
+                        self.movement_status = "timeout"
+                        if (
+                            movement_reason == "working_start"
+                            and self._normal_working_command is not None
+                            and getattr(self.motor12, "planner", None) is not None
+                        ):
+                            self.motor12.planner.working_command = (
+                                self._normal_working_command
+                            )
             if self.movement_status == "telemetry_error":
                 self.movement_status = (
                     "moving"
@@ -217,6 +291,8 @@ class MonitorArmPreparationController:
         self.target_reason = "working_start"
         self.recovery_active = False
         self.working_start_completed = False
+        self.movement_started_at = time.monotonic()
+        self.arrival_stable_sample_count = 0
         self.last_error = None
         self.movement_status = "moving"
         self.working_start_max_error_deg = None
@@ -235,6 +311,8 @@ class MonitorArmPreparationController:
         self.target = self.motor12.rest_command
         self.target_pose = self.kinematics.forward(self.target)
         self.target_reason = "rest"
+        self.movement_started_at = time.monotonic()
+        self.arrival_stable_sample_count = 0
         self.last_error = None
         self.movement_status = "moving"
         self.working_start_max_error_deg = None
@@ -263,6 +341,8 @@ class MonitorArmPreparationController:
         self.target = target
         self.target_pose = self.kinematics.forward(target)
         self.target_reason = "manual_ik"
+        self.movement_started_at = time.monotonic()
+        self.arrival_stable_sample_count = 0
         self.last_error = None
         self.movement_status = "moving"
         self.working_start_max_error_deg = None
@@ -326,6 +406,8 @@ class MonitorArmPreparationController:
         self.recovery_active = False
         self.working_start_completed = False
         self.target_reason = None
+        self.movement_started_at = None
+        self.arrival_stable_sample_count = 0
         planner = getattr(self.motor12, "planner", None)
         if planner is not None and planner.recovery_active:
             planner.cancel_working_pose_recovery()
@@ -515,14 +597,18 @@ class MonitorArmPreparationController:
             "target_reason": self.target_reason,
             "movement_status": self.movement_status,
             "current_target_max_error_deg": self.working_start_max_error_deg,
-            "arrival_tolerance_deg": self.working_start_arrival_tolerance_deg,
+            "arrival_tolerance_deg": self.arrival_tolerance_deg,
             "stable_samples": (
                 0
                 if getattr(self.motor12, "planner", None) is None
-                else self.motor12.planner.recovery_stable_sample_count
+                else (
+                    self.motor12.planner.recovery_stable_sample_count
+                    if self.recovery_active
+                    else self.arrival_stable_sample_count
+                )
             ),
-            "required_stable_samples": self.working_start_stable_samples,
-            "timeout_sec": self.working_start_timeout_sec,
+            "required_stable_samples": self.arrival_stable_samples,
+            "timeout_sec": self.movement_timeout_sec,
             "motor12_hold_reason": self.motor12_hold_reason,
             "motor12_last_error": self.motor12_last_error,
             "current_angles_deg": {

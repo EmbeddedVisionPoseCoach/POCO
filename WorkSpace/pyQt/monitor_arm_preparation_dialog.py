@@ -522,7 +522,7 @@ class MonitorArmPreparationDialog(QDialog):
 
         error = preparation.get("last_error")
         if movement_status == "timeout":
-            self.status_label.setText(f"작업 시작 위치 이동 시간 초과: {error}")
+            self.status_label.setText(f"목표 이동 시간 초과: {error}")
         elif movement_status == "safety_error":
             self.status_label.setText(f"Recovery 안전 검사 중단: {error}")
         elif movement_status == "command_error":

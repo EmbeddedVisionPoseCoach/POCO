@@ -77,9 +77,10 @@ class Motor12Controller:
         self.rest_speed_cap = None
         self.rest_acc_cap = None
 
-        # Motor12 Controller 자체 update는 20Hz로 수행하지만,
-        # 실제 Servo1/2 명령은 monitor_arm_settings.json의 command_hz로 제한한다.
-        self.command_hz = 5.0
+        # 최신 Vision/ToF 목표를 재사용해 Motor12 궤적만 독립적으로 20Hz 생성한다.
+        # trajectory_reference_hz는 기존 5Hz 튜닝의 이동속도를 보존하기 위한 기준이다.
+        self.command_hz = 20.0
+        self.trajectory_reference_hz = 5.0
 
         if settings is not None:
             control = settings.get("control", {})
@@ -90,6 +91,15 @@ class Motor12Controller:
                     control.get(
                         "command_hz",
                         self.command_hz,
+                    )
+                ),
+            )
+            self.trajectory_reference_hz = max(
+                1.0,
+                float(
+                    control.get(
+                        "trajectory_reference_hz",
+                        self.trajectory_reference_hz,
                     )
                 ),
             )
@@ -181,6 +191,21 @@ class Motor12Controller:
                 )
 
         self.command_interval = 1.0 / self.command_hz
+        self.trajectory_step_scale = min(
+            1.0,
+            self.trajectory_reference_hz / self.command_hz,
+        )
+        self.trajectory_max_x_step_m = (
+            None
+            if self.planner is None
+            else self.planner.max_x_step_m * self.trajectory_step_scale
+        )
+        # 20Hz의 작은 중간 목표각만 보고 adaptive speed를 낮추지 않도록
+        # 기존 5Hz 스텝에 해당하는 관절 오차로 환산한다.
+        self.trajectory_speed_error_scale = max(
+            1.0,
+            self.command_hz / self.trajectory_reference_hz,
+        )
         self.last_command_time = 0.0
 
         # 자동추종 진단 상태.
@@ -197,7 +222,7 @@ class Motor12Controller:
         self.rest_mode = False
         self.last_recovery_special = False
     
-        self.update_hz = max(1.0, float(update_hz))
+        self.update_hz = max(1.0, float(update_hz), self.command_hz)
         self.update_interval = 1.0 / self.update_hz
         self.last_update_time = 0.0
         self.enabled = True
@@ -462,7 +487,13 @@ class Motor12Controller:
 
         return None
 
-    def _select_tracking_speed(self, current, target):
+    def _select_tracking_speed(
+        self,
+        current,
+        target,
+        error_scale=1.0,
+        speed_reference_target=None,
+    ):
         """두 Joint 중 더 큰 목표각 오차를 기준으로 공통 Speed를 결정한다."""
         if self.pose_max_speed is None:
             raise RuntimeError("Motor12 모니터암 속도 설정이 준비되지 않았습니다.")
@@ -471,18 +502,37 @@ class Motor12Controller:
             abs(target.shoulder_lift_deg - current.shoulder_lift_deg),
             abs(target.elbow_flex_deg - current.elbow_flex_deg),
         )
+        if speed_reference_target is None:
+            speed_error = largest_delta * max(1.0, float(error_scale))
+        else:
+            speed_error = max(
+                abs(
+                    speed_reference_target.shoulder_lift_deg
+                    - current.shoulder_lift_deg
+                ),
+                abs(
+                    speed_reference_target.elbow_flex_deg
+                    - current.elbow_flex_deg
+                ),
+            )
 
         speed = select_speed(
             self.pose_speed_mode,
             self.pose_max_speed,
             self.pose_min_speed,
             self.pose_full_speed_error_deg,
-            largest_delta,
+            speed_error,
         )
 
         return speed, largest_delta
 
-    def _move_normal_target(self, target):
+    def _move_normal_target(
+        self,
+        target,
+        current=None,
+        speed_error_scale=1.0,
+        speed_reference_target=None,
+    ):
         """일반 자동추종 목표를 Motor1/2 SyncWrite로 전송한다.
 
         Rest/Recovery처럼 Calibration 범위를 벗어나는 특수 자세는
@@ -507,10 +557,15 @@ class Motor12Controller:
                     f"{minimum:+.2f}~{maximum:+.2f}° 밖입니다."
                 )
 
-        # 팀원 원본과 동일하게 실제 명령 직전에 현재각을 다시 읽고
-        # 두 축 중 큰 오차를 기준으로 하나의 공통 Speed를 선택한다.
-        current = self._read_current_angles()
-        speed, largest_delta = self._select_tracking_speed(current, target)
+        # Planner 직전에 읽은 각도를 재사용해 20Hz에서 불필요한 Serial Read를
+        # 두 번 반복하지 않는다. 단독 호출 호환을 위해 current=None은 유지한다.
+        current = current or self._read_current_angles()
+        speed, largest_delta = self._select_tracking_speed(
+            current,
+            target,
+            error_scale=speed_error_scale,
+            speed_reference_target=speed_reference_target,
+        )
 
         success = self.motor.move_joints(
             target_angles,
@@ -896,7 +951,7 @@ class Motor12Controller:
         """Rest 또는 Recovery-required 자세에서 작업자세 복구를 시작한다.
 
         이 함수 자체는 Servo 이동 명령을 보내지 않는다.
-        다음 update()부터 Planner의 inward-only Recovery가 5Hz로 실행된다.
+        다음 update()부터 Planner의 inward-only Recovery가 20Hz로 실행된다.
         """
         if self.planner is None:
             return {
@@ -1012,7 +1067,8 @@ class Motor12Controller:
     def update(self, context):
         """융합 user X를 이용해 Motor1/2 자동추종/Recovery를 수행한다.
 
-        상태 계산은 20Hz, 실제 Servo 명령은 command_hz(현재 5Hz)로 제한한다.
+        상태 계산과 Servo 궤적 명령을 20Hz로 수행한다. Vision/ToF는 별도
+        주기로 최신값을 갱신하며, 이 Controller는 마지막 유효 목표를 재사용한다.
 
         제어 우선순위:
         1. Rest mode -> 완전 HOLD
@@ -1147,7 +1203,7 @@ class Motor12Controller:
             )
             return self.latest_state
 
-        # 실제 Servo 명령은 5Hz gate.
+        # 실제 Servo 명령은 독립 20Hz trajectory gate.
         if (
             now - self.last_command_time
             < self.command_interval
@@ -1262,12 +1318,27 @@ class Motor12Controller:
                 )
                 return self.latest_state
 
+            # Servo Speed는 기존 5Hz/2cm 목표의 관절 오차로 계산해 체감
+            # 이동속도를 유지한다. 실제 전송 목표만 20Hz/5mm로 세분화한다.
+            speed_reference_target = None
+            try:
+                speed_reference_target = self.planner.plan(
+                    current=current,
+                    user_x_m=self.last_user_x_m,
+                    calibration_ranges=self._calibration_ranges(),
+                )
+            except Exception:
+                # 가동범위 경계에서는 작은 20Hz 스텝이 안전할 수 있으므로
+                # 속도 참조 계산 실패가 실제 trajectory를 막지 않게 한다.
+                speed_reference_target = None
+
             target = self.planner.plan(
                 current=current,
                 user_x_m=self.last_user_x_m,
                 calibration_ranges=(
                     self._calibration_ranges()
                 ),
+                max_x_step_m=self.trajectory_max_x_step_m,
             )
 
             if target is None:
@@ -1285,7 +1356,10 @@ class Motor12Controller:
                 return self.latest_state
 
             result = self._move_normal_target(
-                target
+                target,
+                current=current,
+                speed_error_scale=self.trajectory_speed_error_scale,
+                speed_reference_target=speed_reference_target,
             )
 
             self.last_target = target
@@ -1353,6 +1427,9 @@ class Motor12Controller:
             ),
             "update_hz": self.update_hz,
             "command_hz": self.command_hz,
+            "trajectory_reference_hz": self.trajectory_reference_hz,
+            "trajectory_max_x_step_m": self.trajectory_max_x_step_m,
+            "trajectory_speed_error_scale": self.trajectory_speed_error_scale,
             "pose_speed_mode": self.pose_speed_mode,
             "pose_max_speed": self.pose_max_speed,
             "pose_acc": self.pose_acc,

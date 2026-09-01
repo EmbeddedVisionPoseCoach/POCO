@@ -238,8 +238,9 @@ def main():
     # 현재 POCO 통합 기준값이 바뀌지 않았는지 먼저 확인한다.
     assert (
         monitor_arm_settings["control"]["command_hz"]
-        == 5.0
+        == 20.0
     )
+    assert monitor_arm_settings["control"]["trajectory_reference_hz"] == 5.0
     assert (
         monitor_arm_settings["control"]["pose_speed"]
         == 800
@@ -258,6 +259,18 @@ def main():
     )
     assert (
         monitor_arm_settings["control"]["working_start_timeout_sec"]
+        == 25.0
+    )
+    assert (
+        monitor_arm_settings["control"]["preparation_arrival_tolerance_deg"]
+        == 1.0
+    )
+    assert (
+        monitor_arm_settings["control"]["preparation_arrival_stable_samples"]
+        == 3
+    )
+    assert (
+        monitor_arm_settings["control"]["preparation_movement_timeout_sec"]
         == 25.0
     )
 
@@ -631,15 +644,41 @@ def main():
         assert (normal_move["wait"] is False)
 
         # ====================================================
-        # Motor12 command_hz = 5Hz
+        # Motor12 command_hz = 20Hz independent trajectory
         # ====================================================
-        # 0.05초 뒤 update는 가능하지만
-        # 실제 Servo command 0.2초 gate에는 걸린다.
-        motor12_context["now"] = (now + 0.05)
+        initial_pose = motor12.planner.kinematics.forward(
+            JointCommand(0.0, 0.0)
+        )
+        first_target = JointCommand(
+            normal_move["targets"]["shoulder_lift"],
+            normal_move["targets"]["elbow_flex"],
+        )
+        first_pose = motor12.planner.kinematics.forward(first_target)
+        assert abs((first_pose.x_m - initial_pose.x_m) - 0.005) < 1e-6
+        assert abs(state12["trajectory_max_x_step_m"] - 0.005) < 1e-9
+        assert state12["trajectory_speed_error_scale"] == 4.0
+        legacy_target = motor12.planner.plan(
+            JointCommand(0.0, 0.0),
+            user_x_m=0.80,
+        )
+        legacy_speed, _legacy_delta = motor12._select_tracking_speed(
+            JointCommand(0.0, 0.0),
+            legacy_target,
+        )
+        assert normal_move["speed"] == legacy_speed
 
-        motor12.update(motor12_context)
+        # 기존 5Hz 1주기(0.2초)의 2cm 이동을 20Hz 4개 목표로 분할한다.
+        for offset in (0.051, 0.102, 0.153):
+            motor12_context["now"] = now + offset
+            motor12.update(motor12_context)
 
-        assert len(fake.sync_moves) == 1
+        assert len(fake.sync_moves) == 4
+        fourth_target = JointCommand(
+            fake.sync_moves[-1]["targets"]["shoulder_lift"],
+            fake.sync_moves[-1]["targets"]["elbow_flex"],
+        )
+        fourth_pose = motor12.planner.kinematics.forward(fourth_target)
+        assert abs((fourth_pose.x_m - initial_pose.x_m) - 0.020) < 1e-6
 
         # ====================================================
         # ToF/Fusion invalid -> SAFE_HOLD
@@ -665,7 +704,7 @@ def main():
         assert (state12["hold_reason"] == "SAFE_HOLD")
 
         # 잘못된 센서 입력으로 추가 이동하면 안 된다.
-        assert len(fake.sync_moves) == 1
+        assert len(fake.sync_moves) == 4
 
         # ====================================================
         # Rest 특수 자세
@@ -897,6 +936,46 @@ def main():
                 "motor4": "imu_x",
             }
         )
+
+        # ====================================================
+        # Smooth preparation arrival / timeout regression
+        # ====================================================
+        # Smooth working/manual IK is sent as one synchronized goal, so it does
+        # not use Planner recovery counters. A realistic 0.8° stop error must
+        # complete after three telemetry samples (the old 0.5° logic stuck).
+        preparation.active = True
+        preparation.connected = True
+        preparation.target = JointCommand(0.0, 0.0)
+        preparation.target_reason = "working_start"
+        preparation.recovery_active = False
+        preparation.working_start_completed = False
+        preparation.movement_started_at = time.monotonic()
+        preparation.arrival_stable_sample_count = 0
+        preparation.movement_status = "moving"
+        fake.angles["shoulder_lift"] = 0.8
+        fake.angles["elbow_flex"] = -0.7
+        for _ in range(3):
+            preparation.refresh_telemetry(force=True)
+        preparation_state = preparation.snapshot()
+        assert preparation_state["working_start_completed"] is True
+        assert preparation_state["movement_active"] is False
+        assert preparation_state["movement_status"] == "completed"
+        assert preparation_state["stable_samples"] == 3
+
+        # An unreachable goal must stop with a visible timeout instead of
+        # leaving the UI in an endless "moving" state.
+        preparation.target = JointCommand(10.0, 10.0)
+        preparation.target_reason = "manual_ik"
+        preparation.movement_started_at = (
+            time.monotonic() - preparation.movement_timeout_sec - 1.0
+        )
+        preparation.arrival_stable_sample_count = 0
+        preparation.movement_status = "moving"
+        preparation.refresh_telemetry(force=True)
+        preparation_state = preparation.snapshot()
+        assert preparation_state["movement_active"] is False
+        assert preparation_state["movement_status"] == "timeout"
+        assert "도착하지 못했습니다" in preparation_state["last_error"]
 
         motor.close()
 

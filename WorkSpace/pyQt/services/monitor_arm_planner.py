@@ -239,6 +239,7 @@ class MonitorArmPlanner:
         current: JointCommand,
         user_x_m: float,
         calibration_ranges: dict[str, tuple[float, float]] | None = None,
+        max_x_step_m: float | None = None,
     ) -> JointCommand | None:
         if self.reference_z_m is None:
             self.set_vertical_reference(current)
@@ -256,10 +257,15 @@ class MonitorArmPlanner:
         if abs(monitor_x_error) <= self.deadband_m:
             return None
 
+        step_limit_m = (
+            self.max_x_step_m
+            if max_x_step_m is None
+            else min(self.max_x_step_m, max(1e-6, float(max_x_step_m)))
+        )
         x_step = self._clamp(
             monitor_x_error,
-            -self.max_x_step_m,
-            self.max_x_step_m,
+            -step_limit_m,
+            step_limit_m,
         )
         full_target = self.kinematics.inverse(
             current_pose.x_m + x_step,

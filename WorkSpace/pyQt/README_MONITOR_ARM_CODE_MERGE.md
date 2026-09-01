@@ -867,7 +867,7 @@ Ctrl+F: def update
 
 ```text
 Controller 상태 계산 주기: 20 Hz
-Servo 실제 명령:          5 Hz
+Servo 실제 명령:          20 Hz trajectory
 ```
 
 커밋:
@@ -929,7 +929,7 @@ WorkSpace/pyQt/hardware_logic_selftest.py
 - Vision Distance
 - ToF/Vision Fusion
 - Motor1/2 Pair SyncWrite
-- Motor12 5 Hz command gate
+- Motor12 20 Hz trajectory와 기존 5 Hz 체감속도 보존
 - SAFE_HOLD
 - Rest 특수 SyncWrite
 - Recovery
@@ -1310,7 +1310,8 @@ pose_variable_full_speed_error_deg
 현재 핵심값:
 
 ```text
-command_hz = 5.0
+command_hz = 20.0
+trajectory_reference_hz = 5.0
 pose_speed = 800
 pose_acc   = 20
 ```
@@ -1340,15 +1341,17 @@ monitor_arm_settings.json
 control.command_hz
 ```
 
-현재 `5.0 Hz`이다.
+현재 `20.0 Hz`이다.
 
-Motor12 update는 별도로 20 Hz이지만 실제 Servo Packet은 `command_hz` Gate를 통과할 때만 전송한다.
+Motor12는 마지막 유효 Vision/ToF 목표를 재사용해 20 Hz로 중간 목표를 생성한다.
+기존 5 Hz에서 한 번에 이동하던 2 cm를 5 mm씩 네 번으로 나누며,
+Adaptive Speed 계산은 기존 5 Hz 목표 오차를 사용해 전체 이동속도를 유지한다.
 
 구현:
 
 ```text
 WorkSpace/pyQt/services/motor12_controller.py
-Ctrl+F: 실제 Servo 명령은 5Hz gate
+Ctrl+F: 실제 Servo 명령은 독립 20Hz trajectory gate
 ```
 
 ---
