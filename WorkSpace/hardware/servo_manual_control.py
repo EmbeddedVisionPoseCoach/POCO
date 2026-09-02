@@ -146,35 +146,31 @@ import time
 
 
 # ============================================================
-# 1. STServo Python SDK 경로
+# 1. STServo Python SDK 경로 설정
 # ============================================================
 
-BASE_DIR = os.path.dirname(
-    os.path.abspath(__file__)
-)
+# 현재 servo_manual_control.py 파일이 위치한 폴더
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-SDK_PATH = os.path.join(
+# 현재 파일 위치를 기준으로 STServo SDK 경로 생성
+sdk_path = os.path.join(
     BASE_DIR,
-    "stservo_env",
-    "scservo_sdk"
+    "STServo_Python",
+    "stservo-env",
+    "scservo_sdk",
 )
 
-if SDK_PATH not in sys.path:
-    sys.path.insert(0, SDK_PATH)
+if sdk_path not in sys.path:
+    sys.path.append(sdk_path)
 
 
 # ============================================================
 # 2. STServo SDK
 # ============================================================
 
-try:
-    from port_handler import PortHandler
-    from sms_sts import sms_sts
-    from scservo_def import *
-except ModuleNotFoundError:
-    from scservo_sdk.port_handler import PortHandler
-    from scservo_sdk.sms_sts import sms_sts
-    from scservo_sdk.scservo_def import *
+from port_handler import PortHandler
+from sms_sts import sms_sts
+from scservo_def import *
 
 
 # ============================================================
@@ -191,7 +187,7 @@ BAUDRATE = 1000000
 
 CALIBRATION_FILE = os.path.join(
     BASE_DIR,
-    "servo_calibration_result.json"
+    "servo_calibration_result.json",
 )
 
 

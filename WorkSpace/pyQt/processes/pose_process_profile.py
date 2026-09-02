@@ -17,6 +17,7 @@ faulthandler.enable(all_threads=True)
 
 import sys
 import time
+import math
 from pathlib import Path
 from queue import Empty
 
@@ -35,10 +36,20 @@ from services.calibration_service import CalibrationService
 from services.pose_gru_service import PoseGruService
 
 MODE_IDLE = "IDLE"
+MODE_PREPARING = "PREPARING"
 MODE_CALIBRATING = "CALIBRATING"
 MODE_WAITING = "WAITING"
 MODE_MEASURING = "MEASURING"
 PROFILE_INTERVAL_SEC = 2.0
+LEFT_EYE_INDEX = 2
+RIGHT_EYE_INDEX = 5
+MINIMUM_EYE_GAP_PX = 5.0
+# Monitor-arm presence/distance control uses both eyes and shoulders. Requiring
+# both hips as well made a normally seated user "missing" whenever the desk or
+# the bottom of the camera frame hid the pelvis, even though none of the active
+# distance/posture features needs hip visibility.
+CONTROL_LANDMARK_INDICES = (2, 5, 11, 12)
+CONTROL_LANDMARK_MIN_VISIBILITY = 0.60
 
 
 class ProcessProfiler:
@@ -158,6 +169,38 @@ def serialize_pose_landmarks(results):
     ]
 
 
+def pose_control_landmark_quality(results):
+    """Return minimum visibility for the eyes/shoulders used by arm control."""
+    if results is None or not results.pose_landmarks:
+        return 0.0, False
+    landmarks = results.pose_landmarks.landmark
+    if len(landmarks) <= max(CONTROL_LANDMARK_INDICES):
+        return 0.0, False
+    quality = min(float(landmarks[index].visibility) for index in CONTROL_LANDMARK_INDICES)
+    return quality, bool(math.isfinite(quality) and quality >= CONTROL_LANDMARK_MIN_VISIBILITY)
+
+
+def measure_pose_eye_gap_px(results, frame_width, frame_height):
+    """MediaPipe Pose 2·5번 눈 landmark의 2D pixel 간격을 반환한다."""
+    if results is None or not results.pose_landmarks:
+        return None
+    landmarks = results.pose_landmarks.landmark
+    if len(landmarks) <= RIGHT_EYE_INDEX:
+        return None
+    left = landmarks[LEFT_EYE_INDEX]
+    right = landmarks[RIGHT_EYE_INDEX]
+    if float(getattr(left, "visibility", 1.0)) < 0.5:
+        return None
+    if float(getattr(right, "visibility", 1.0)) < 0.5:
+        return None
+    dx_px = (float(left.x) - float(right.x)) * float(frame_width)
+    dy_px = (float(left.y) - float(right.y)) * float(frame_height)
+    gap_px = math.hypot(dx_px, dy_px)
+    if not math.isfinite(gap_px) or gap_px < MINIMUM_EYE_GAP_PX:
+        return None
+    return gap_px
+
+
 def run_pose_process(
     stop_event,
     command_queue,
@@ -185,6 +228,7 @@ def run_pose_process(
     calibration_emit_time = 0.0
     latest_hardware_state = None
     latest_hardware_event = None
+    latest_pose_inference = None
     profiler = ProcessProfiler("POSE")
 
     try:
@@ -233,6 +277,7 @@ def run_pose_process(
                 command = command_queue.get_nowait()
 
                 if command == "START_CALIBRATION":
+                    latest_pose_inference = None
                     gru_service.stop()
                     calibration_result = calibration_service.start()
                     mode = MODE_CALIBRATING
@@ -253,7 +298,28 @@ def run_pose_process(
                     put_ordered(pose_to_hw_event_queue, started_event)
                     print("[PoseProcess:PROFILE] Calibration 시작")
 
+                elif command == "START_PREPARATION":
+                    latest_pose_inference = None
+                    calibration_service.cancel()
+                    gru_service.stop()
+                    mode = MODE_PREPARING
+                    previous_frame_id = None
+                    processed_count = 0
+                    sequence_drop_count = 0
+                    stat_start_time = time.monotonic()
+                    profiler.reset()
+                    prepared_event = {
+                        "type": "POSE_PREPARATION_STARTED",
+                        "success": True,
+                        "message": "준비 창용 MediaPipe Pose/눈 간격 측정을 시작했습니다.",
+                        "timestamp": time.time(),
+                    }
+                    result_queue.put(prepared_event)
+                    put_ordered(pose_to_hw_event_queue, prepared_event)
+                    print("[PoseProcess:PROFILE] Monitor-arm preparation 시작")
+
                 elif command in ("START", "START_MEASUREMENT"):
+                    latest_pose_inference = None
                     calibration_service.cancel()
 
                     try:
@@ -292,6 +358,7 @@ def run_pose_process(
                         print(f"[PoseProcess:PROFILE] 측정 시작 실패: {e}")
 
                 elif command == "STOP":
+                    latest_pose_inference = None
                     mode = MODE_IDLE
                     calibration_service.cancel()
                     gru_service.stop()
@@ -356,6 +423,12 @@ def run_pose_process(
             feature_start = time.perf_counter_ns()
             features = build_pose_features(results)
             landmarks = serialize_pose_landmarks(results)
+            landmark_quality, control_landmark_valid = pose_control_landmark_quality(results)
+            eye_gap_px = measure_pose_eye_gap_px(
+                results,
+                frame.shape[1],
+                frame.shape[0],
+            )
             feature_end = time.perf_counter_ns()
             profiler.add("feature", feature_end - feature_start)
 
@@ -367,9 +440,14 @@ def run_pose_process(
                 "timestamp_ns": timestamp_ns,
                 "mode": mode,
                 "landmark_valid": landmarks is not None,
+                "control_landmark_valid": control_landmark_valid,
+                "landmark_quality": landmark_quality,
+                "landmark_min_visibility": CONTROL_LANDMARK_MIN_VISIBILITY,
                 "landmarks": landmarks,
+                "eye_gap_valid": eye_gap_px is not None,
+                "eye_gap_px": eye_gap_px,
                 "features": features.tolist() if features is not None else None,
-                "inference": None,
+                "inference": latest_pose_inference,
                 "calibration": None,
                 "hardware_state": latest_hardware_state,
                 "hardware_event": latest_hardware_event,
@@ -441,12 +519,14 @@ def run_pose_process(
                     }
                     result_queue.put(pose_result)
 
-                    pose_state["inference"] = {
+                    latest_pose_inference = {
                         "posture_type": gru_result["posture_type"],
                         "confidence": gru_result["confidence"],
                         "pose_index": gru_result["pose_index"],
                         "latency_ms": total_latency_ms,
+                        "timestamp": time.time(),
                     }
+                    pose_state["inference"] = latest_pose_inference
 
             # State는 항상 최신값 하나만 유지한다.
             put_latest(state_to_main_queue, pose_state)

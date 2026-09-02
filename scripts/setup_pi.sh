@@ -70,17 +70,54 @@ fi
 
 # [5/10] OpenCV 및 AI 라이브러리 설치
 echo "[5/10] OpenCV 및 AI 라이브러리 설치..."
-pip uninstall -y opencv-python opencv-contrib-python opencv-python-headless || true
-pip install "opencv-python==4.10.0.84" "opencv-contrib-python==4.10.0.84"
-pip install "mediapipe==0.10.14" "jax<0.4.20" "jaxlib<0.4.20" "ml-dtypes~=0.2.0" "pandas==2.1.4" cvzone h5py ai-edge-litert
 
-# [6/10] Streamlit 리포트 및 데이터 분석 라이브러리 설치
+pip uninstall -y \
+    opencv-python \
+    opencv-contrib-python \
+    opencv-python-headless \
+    opencv-contrib-python-headless || true
+
+# TensorFlow / MediaPipe / Pandas 공통 호환 버전
+pip install \
+    "numpy==1.26.4" \
+    "protobuf==4.25.9"
+
+# MediaPipe 의존성
+pip install \
+    absl-py \
+    "attrs>=19.1.0" \
+    "flatbuffers>=2.0" \
+    matplotlib \
+    "sounddevice>=0.4.4" \
+    "jax<0.4.20" \
+    "jaxlib<0.4.20" \
+    "ml-dtypes~=0.2.0" \
+    "pandas==2.1.4" \
+    h5py \
+    ai-edge-litert
+
+# PyQt가 GUI를 담당하므로 OpenCV GUI 제거
+pip install "opencv-contrib-python-headless==4.10.0.84"
+
+# OpenCV dependency를 다시 일반 버전으로 덮어쓰지 않도록 --no-deps
+pip install --no-deps "mediapipe==0.10.14"
+pip install --no-deps cvzone
+
+
+# [6/10] Streamlit 및 데이터 분석 라이브러리
 echo "[6/10] Streamlit, Plotly, Joblib, Scikit-learn, PySerial 설치..."
-pip install plotly streamlit joblib scikit-learn pyserial
 
-# [7/10] NumPy 버전 고정
-echo "[7/10] NumPy 버전 최적화 (1.x 고정)..."
-pip install "numpy<2.0.0"
+pip install \
+    plotly \
+    "streamlit==1.54.0" \
+    joblib \
+    scikit-learn \
+    pyserial
+
+
+# [7/10] NumPy 최종 확인
+echo "[7/10] NumPy 버전 고정..."
+pip install "numpy==1.26.4" "protobuf==4.25.9"
 
 # [8/10] Streamlit 설정 파일 자동 생성
 echo "[8/10] Streamlit 설정 파일 생성..."

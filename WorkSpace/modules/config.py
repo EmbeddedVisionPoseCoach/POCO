@@ -86,25 +86,3 @@ MODEL_VERSION_GRU = "gru"
 MODEL_VERSION = MODEL_VERSION_GRU
 
 
-
-# ------------------------------------------------------------
-# Hardware 설정
-# ------------------------------------------------------------
-
-# Windows 개발 환경에서는 False 추천
-HARDWARE_ENABLED = False
-
-# 아두이노가 연결된 포트 이름
-# 라즈베리파이에서는 보통 Arduino Uno가 /dev/ttyACM0 또는 /dev/ttyUSB0로 잡힘
-HARDWARE_SERIAL_PORT = "/dev/ttyACM0"
-
-# 만약 위 포트로 연결이 안 되면 아래처럼 바꿔서 테스트할 수 있음
-# HARDWARE_SERIAL_PORT = "/dev/ttyUSB0"
-
-# 통신 속도
-# 아두이노 코드의 Serial.begin(115200); 과 반드시 같아야 함
-HARDWARE_BAUD_RATE = 115200
-
-# 시리얼 데이터를 읽을 때 최대 몇 초까지 기다릴지 설정
-# 1초 동안 데이터가 없으면 읽기를 포기하고 다음 코드로 넘어감
-HARDWARE_TIMEOUT = 1

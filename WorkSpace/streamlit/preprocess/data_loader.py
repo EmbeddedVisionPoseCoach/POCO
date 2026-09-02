@@ -9,12 +9,13 @@ import pandas as pd
 # ------------------------------------------------------------
 
 # 현재 파일:
-# WorkSpace/preprocess/data_loader.py
+# WorkSpace/streamlit/preprocess/data_loader.py
 #
-# parents[1] = WorkSpace
-BASE_DIR = Path(__file__).resolve().parents[1]
+# parents[2] = WorkSpace
+BASE_DIR = Path(__file__).resolve().parents[2]
 
-LOG_DIR = BASE_DIR / "data" / "logs"
+LOG_DIR = BASE_DIR / "data" / "session_log"
+# 구버전 단일 로그 파일 호환용 fallback 경로
 DEFAULT_LOG_PATH = LOG_DIR / "posture_log.csv"
 
 
@@ -112,12 +113,15 @@ def load_posture_log(csv_path: Optional[str | Path] = None) -> pd.DataFrame:
     5. timestamp datetime 변환
     6. 숫자 컬럼 numeric 변환
     7. bool 컬럼 변환
-    8. elapsed_sec 기준 중복 제거
-    9. elapsed_sec 기준 정렬
+    8. timestamp 기준 중복 제거
+    9. timestamp 기준 정렬
     """
 
     if csv_path is None:
-        csv_path = DEFAULT_LOG_PATH
+        # 날짜별 로그가 있으면 가장 최근 파일을 기본값으로 사용한다.
+        # Streamlit의 날짜 선택 로직에서는 항상 선택된 csv_path를 직접 넘긴다.
+        dated_logs = sorted(LOG_DIR.glob("posture_log_*.csv"), reverse=True)
+        csv_path = dated_logs[0] if dated_logs else DEFAULT_LOG_PATH
 
     csv_path = Path(csv_path)
 

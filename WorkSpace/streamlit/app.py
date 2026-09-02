@@ -1834,116 +1834,124 @@ header_placeholder.markdown(
 # 탭
 # ------------------------------------------------------------
 
-tab_report, tab_posture, tab_fatigue = st.tabs([
-    "오늘의 리포트",
-    "자세 분석",
-    "피로도 분석"
-])
+# 현재는 자세 분석 탭만 노출한다.
+# 피로도 기능을 다시 붙일 때 아래 값을 True로 바꾸면 기존 3개 탭이 그대로 복구된다.
+SHOW_FULL_REPORT_TABS = False
+
+if SHOW_FULL_REPORT_TABS:
+    tab_report, tab_posture, tab_fatigue = st.tabs([
+        "오늘의 리포트",
+        "자세 분석",
+        "피로도 분석"
+    ])
+else:
+    tab_posture, = st.tabs(["자세 분석"])
 
 
 # ------------------------------------------------------------
 # 1. 오늘의 리포트
 # ------------------------------------------------------------
 
-with tab_report:
-    st.markdown('<div class="section-title">오늘의 리포트</div>', unsafe_allow_html=True)
+if SHOW_FULL_REPORT_TABS:
+    with tab_report:
+        st.markdown('<div class="section-title">오늘의 리포트</div>', unsafe_allow_html=True)
 
-    posture_score = score_summary["posture_score"]
-    fatigue_score = score_summary["fatigue_score"]
+        posture_score = score_summary["posture_score"]
+        fatigue_score = score_summary["fatigue_score"]
 
-    score_bar_df = make_score_bar_df(
-        posture_score=posture_score,
-        fatigue_score=fatigue_score,
-        posture_grade=score_summary.get("posture_grade", "-"),
-        fatigue_grade=score_summary.get("fatigue_grade", "-")
-    )
-    left_space, chart_area, right_space = st.columns([1, 4, 1])
-
-    with chart_area:
-        render_score_bar_chart(
-        score_bar_df,
-        title="자세 / 피로도 점수"
-    )
-
-
-    st.write("")
-
-    c1, c2, c3= st.columns(3)
-    with c1:
-        render_metric_card(
-            "나쁜 자세 누적시간",
-            posture_summary["bad_time_text"],
-            # f"비율 {format_percent_from_ratio(posture_summary['bad_ratio'])}",
-            "",
-            "#f44444",
-            "!",
-            card_size="small"
+        score_bar_df = make_score_bar_df(
+            posture_score=posture_score,
+            fatigue_score=fatigue_score,
+            posture_grade=score_summary.get("posture_grade", "-"),
+            fatigue_grade=score_summary.get("fatigue_grade", "-")
         )
-    with c2:
-        render_metric_card(
-            "피로 경고 누적시간",
-            fatigue_summary["drowsy_time_text"],
-            # f"비율 {format_percent_from_ratio(fatigue_summary['drowsy_ratio'])}",
-            "",
-            "#8b5cf6",
-            "◔",
-            card_size="small"
-        )    
-    with c3:
-        render_metric_card(
-            "총 측정 시간",
-            session["total_logged_time_text"],
-            # f"전체 로그 {session['row_count']}개",
-            "",
-            "#173a6a",
-            "⏱",
-            card_size="small"
-        ) 
+        left_space, chart_area, right_space = st.columns([1, 4, 1])
 
-
-    st.write("")
-    st.write("")
-    st.write("")
-
-    if not minute_df.empty:
-        report_time_unit_min = st.selectbox(
-        label="그래프 시간 단위",
-        options=[5, 10, 15, 30],
-        index=0,
-        key="report_time_unit_min",
-        format_func=lambda x: f"{x}분 단위",
-        label_visibility="collapsed"
+        with chart_area:
+            render_score_bar_chart(
+            score_bar_df,
+            title="자세 / 피로도 점수"
         )
 
 
-        cc1, cc2 = st.columns(2)
+        st.write("")
 
-        with cc1:
-            render_line_chart(
-                minute_df,
-                x_col="minute_label",
-                y_specs=[
-                    {"col": "avg_posture_score", "name": "자세 점수", "color": "#1db67d"},
-                    {"col": "avg_fatigue_score", "name": "피로도 점수", "color": "#3d7ee8"},
-                ],
-                title=f"{report_time_unit_min}분 단위 최고 점수 추이",
-                unit_min=report_time_unit_min
+        c1, c2, c3= st.columns(3)
+        with c1:
+            render_metric_card(
+                "나쁜 자세 누적시간",
+                posture_summary["bad_time_text"],
+                # f"비율 {format_percent_from_ratio(posture_summary['bad_ratio'])}",
+                "",
+                "#f44444",
+                "!",
+                card_size="small"
+            )
+        with c2:
+            render_metric_card(
+                "피로 경고 누적시간",
+                fatigue_summary["drowsy_time_text"],
+                # f"비율 {format_percent_from_ratio(fatigue_summary['drowsy_ratio'])}",
+                "",
+                "#8b5cf6",
+                "◔",
+                card_size="small"
+            )
+        with c3:
+            render_metric_card(
+                "총 측정 시간",
+                session["total_logged_time_text"],
+                # f"전체 로그 {session['row_count']}개",
+                "",
+                "#173a6a",
+                "⏱",
+                card_size="small"
             )
 
-        with cc2:
-            render_line_chart(
-                minute_df,
-                x_col="minute_label",
-                y_specs=[
-                    {"col": "good_ratio_percent", "name": "정자세 유지율", "color": "#1db67d"},
-                    {"col": "drowsy_ratio_percent", "name": "피로 의심 비율", "color": "#8b5cf6"},
-                ],
-                title=f"{report_time_unit_min}분 단위 최고 비율 추이",
-                y_suffix="%",
-                unit_min=report_time_unit_min
+
+        st.write("")
+        st.write("")
+        st.write("")
+
+        if not minute_df.empty:
+            report_time_unit_min = st.selectbox(
+            label="그래프 시간 단위",
+            options=[5, 10, 15, 30],
+            index=0,
+            key="report_time_unit_min",
+            format_func=lambda x: f"{x}분 단위",
+            label_visibility="collapsed"
             )
 
-    st.write("")
+
+            cc1, cc2 = st.columns(2)
+
+            with cc1:
+                render_line_chart(
+                    minute_df,
+                    x_col="minute_label",
+                    y_specs=[
+                        {"col": "avg_posture_score", "name": "자세 점수", "color": "#1db67d"},
+                        {"col": "avg_fatigue_score", "name": "피로도 점수", "color": "#3d7ee8"},
+                    ],
+                    title=f"{report_time_unit_min}분 단위 최고 점수 추이",
+                    unit_min=report_time_unit_min
+                )
+
+            with cc2:
+                render_line_chart(
+                    minute_df,
+                    x_col="minute_label",
+                    y_specs=[
+                        {"col": "good_ratio_percent", "name": "정자세 유지율", "color": "#1db67d"},
+                        {"col": "drowsy_ratio_percent", "name": "피로 의심 비율", "color": "#8b5cf6"},
+                    ],
+                    title=f"{report_time_unit_min}분 단위 최고 비율 추이",
+                    y_suffix="%",
+                    unit_min=report_time_unit_min
+                )
+
+        st.write("")
 
 
 # ------------------------------------------------------------
@@ -2131,206 +2139,207 @@ with tab_posture:
 # 3. 피로도 분석
 # ------------------------------------------------------------
 
-with tab_fatigue:
-    st.markdown('<div class="section-title">피로도 분석</div>', unsafe_allow_html=True)
+if SHOW_FULL_REPORT_TABS:
+    with tab_fatigue:
+        st.markdown('<div class="section-title">피로도 분석</div>', unsafe_allow_html=True)
 
-    fatigue_dist_df = make_fatigue_distribution_df(fatigue_summary["fatigue_label_seconds"])
+        fatigue_dist_df = make_fatigue_distribution_df(fatigue_summary["fatigue_label_seconds"])
 
-    left_space, chart_area, right_space = st.columns([1, 4, 1])
+        left_space, chart_area, right_space = st.columns([1, 4, 1])
 
-    with chart_area:
-        render_donut_chart(
-            fatigue_dist_df,
-            title="피로 상태 분포",
-            center_text="피로\n분포"
-        )
-
-    # st.write("")
-
-    # f1, f2, f3 = st.columns(3)
-    # with f1:
-    #     render_metric_card(
-    #         "평균 피로도",
-    #         f"{score_summary['fatigue_score']}점",
-    #         "임시 Value",
-    #         "#3d7ee8",
-    #         "◉"
-    #     )
-    # with f2:
-    #     render_metric_card(
-    #         "평균 눈 감김 정도",
-    #         format_number(fatigue_summary["avg_eye_closed_ratio"]),
-    #         "",
-    #         "#6366f1",
-    #         "◎"
-    #     )
-    # with f3:
-    #     render_metric_card(
-    #         "하품 횟수",
-    #         f"{fatigue_summary['total_yawn_count']}회",
-    #         "",
-    #         "#f59e0b",
-    #         "◌"
-    #     )
-    # with f4:
-    #     render_metric_card(
-    #         "최대 눈 감김 지속",
-    #         f"{format_number(fatigue_summary['max_eye_closed_duration'])}초",
-    #         "연속 눈 감김 최대값",
-    #         "#ef4444",
-    #         "◡"
-    #     )
-
-    st.write("")
-
-    f5, f6, f7 = st.columns(3)
-    with f5:
-        render_metric_card(
-            "평균 피로도",
-            f"{score_summary['fatigue_score']}점",
-            "임시 Value",
-            "#3d7ee8",
-            "◉",
-            card_size="small"
-        )
-    with f6:
-    
-        render_metric_card(
-            "정상 시간",
-            fatigue_summary["normal_time_text"],
-            "",
-            "#3d7ee8",
-            "✓",
-            card_size="small"
-        )
-    with f7:
-        render_metric_card(
-            "피로 경고 누적시간",
-            fatigue_summary["drowsy_time_text"],
-            # f"비율 {format_percent_from_ratio(fatigue_summary['drowsy_ratio'])}",
-            "",
-            "#8b5cf6",
-            "◔",
-            card_size="small"
-        )
-    # with f7:
-    #     render_metric_card(
-    #         "평균 입 벌림 비율",
-    #         format_number(fatigue_summary["avg_mouth_open_ratio"]),
-    #         "mouth_open_ratio 평균",
-    #         "#f97316",
-    #         "◠"
-    #     )
-    # with f7:
-    #     render_metric_card(
-    #         "총 측정 시간",
-    #         session["total_elapsed_time_text"],
-    #         "",
-    #         "#173a6a",
-    #         "⏱"
-    #     )
-
-    st.write("")
-
-    # fatigue_dist_df = make_fatigue_distribution_df(fatigue_summary["fatigue_label_seconds"])
-    # fd_left, fd_right = st.columns(2)
-
-
-    # with fd_left:
-    #     render_donut_chart(
-    #         fatigue_dist_df,
-    #         title="피로 상태 분포",
-    #         center_text="피로\n분포"
-    #     )
-
-    # with fd_right:
-    #     fatigue_rows = []
-    #     total_fatigue_sec = sum(fatigue_summary["fatigue_label_seconds"].values())
-
-    #     for _, row in fatigue_dist_df.iterrows():
-    #         ratio = (row["seconds"] / total_fatigue_sec) if total_fatigue_sec > 0 else 0
-    #         fatigue_rows.append([
-    #             row["name"],
-    #             seconds_to_text(int(row["seconds"])),
-    #             format_percent_from_ratio(ratio)
-    #         ])
-
-    #     render_pretty_table(
-    #         title="피로 상태 비율 표",
-    #         columns=["상태", "누적 시간", "비율"],
-    #         rows=fatigue_rows
-    #     )
-
-    st.markdown('<div class="section-title">피로도 세부 지표</div>', unsafe_allow_html=True)
-
-    # fatigue_metric = fatigue_summary["metric_summary"]
-    # render_pretty_table(
-    #     title="피로도 지표 요약",
-    #     columns=["지표", "평균", "최대"],
-    #     rows=[
-    #         [
-    #             "눈 감김 비율",
-    #             format_number(fatigue_metric.get("avg_eye_closed_ratio")),
-    #             format_number(fatigue_metric.get("max_eye_closed_ratio"))
-    #         ],
-    #         [
-    #             "연속 눈 감김 시간",
-    #             format_number(fatigue_metric.get("avg_eye_closed_duration")),
-    #             format_number(fatigue_metric.get("max_eye_closed_duration"))
-    #         ],
-    #         [
-    #             "입 벌림 비율",
-    #             format_number(fatigue_metric.get("avg_mouth_open_ratio")),
-    #             format_number(fatigue_metric.get("max_mouth_open_ratio"))
-    #         ]
-    #     ]
-    # )
-
-    if not minute_df.empty:
-        st.write("")
-
-        fatigue_time_unit_min = st.selectbox(
-            "그래프 시간 단위",
-            options=[5, 10, 15, 30],
-            index=0,
-            key="fatigue_time_unit_min"
-        )
-
-
-        render_line_chart(
-            minute_df,
-            x_col="minute_label",
-            y_specs=[{"col": "drowsy_ratio_percent", "name": "피로 경고 비율", "color": "#8b5cf6"},],
-            title=f"{fatigue_time_unit_min}분 단위 피로 의심 비율 최고값",
-            y_suffix="%",
-            unit_min=fatigue_time_unit_min
+        with chart_area:
+            render_donut_chart(
+                fatigue_dist_df,
+                title="피로 상태 분포",
+                center_text="피로\n분포"
             )
 
-        # ff1, ff2 = st.columns(2)
+        # st.write("")
 
-        # with ff1:
-        #     render_line_chart(
-        #         minute_df,
-        #         x_col="minute_label",
-        #         y_specs=[
-        #             {"col": "drowsy_ratio_percent", "name": "피로 경고 비율", "color": "#8b5cf6"},
-        #         ],
-        #         title=f"{fatigue_time_unit_min}분 단위 피로 의심 비율 최고값",
-        #         y_suffix="%",
-        #         unit_min=fatigue_time_unit_min
+        # f1, f2, f3 = st.columns(3)
+        # with f1:
+        #     render_metric_card(
+        #         "평균 피로도",
+        #         f"{score_summary['fatigue_score']}점",
+        #         "임시 Value",
+        #         "#3d7ee8",
+        #         "◉"
+        #     )
+        # with f2:
+        #     render_metric_card(
+        #         "평균 눈 감김 정도",
+        #         format_number(fatigue_summary["avg_eye_closed_ratio"]),
+        #         "",
+        #         "#6366f1",
+        #         "◎"
+        #     )
+        # with f3:
+        #     render_metric_card(
+        #         "하품 횟수",
+        #         f"{fatigue_summary['total_yawn_count']}회",
+        #         "",
+        #         "#f59e0b",
+        #         "◌"
+        #     )
+        # with f4:
+        #     render_metric_card(
+        #         "최대 눈 감김 지속",
+        #         f"{format_number(fatigue_summary['max_eye_closed_duration'])}초",
+        #         "연속 눈 감김 최대값",
+        #         "#ef4444",
+        #         "◡"
         #     )
 
-        # with ff2:
-        #     render_line_chart(
-        #         minute_df,
-        #         x_col="minute_label",
-        #         y_specs=[
-        #             {"col": "avg_eye_closed_ratio", "name": "눈 감김 비율", "color": "#6366f1"},
-        #             {"col": "avg_mouth_open_ratio", "name": "입 벌림 비율", "color": "#f97316"},
-        #         ],
-        #         title=f"{fatigue_time_unit_min}분 단위 눈 감김 / 입 벌림 최고값", 
-        #         unit_min=fatigue_time_unit_min
+        st.write("")
+
+        f5, f6, f7 = st.columns(3)
+        with f5:
+            render_metric_card(
+                "평균 피로도",
+                f"{score_summary['fatigue_score']}점",
+                "임시 Value",
+                "#3d7ee8",
+                "◉",
+                card_size="small"
+            )
+        with f6:
+
+            render_metric_card(
+                "정상 시간",
+                fatigue_summary["normal_time_text"],
+                "",
+                "#3d7ee8",
+                "✓",
+                card_size="small"
+            )
+        with f7:
+            render_metric_card(
+                "피로 경고 누적시간",
+                fatigue_summary["drowsy_time_text"],
+                # f"비율 {format_percent_from_ratio(fatigue_summary['drowsy_ratio'])}",
+                "",
+                "#8b5cf6",
+                "◔",
+                card_size="small"
+            )
+        # with f7:
+        #     render_metric_card(
+        #         "평균 입 벌림 비율",
+        #         format_number(fatigue_summary["avg_mouth_open_ratio"]),
+        #         "mouth_open_ratio 평균",
+        #         "#f97316",
+        #         "◠"
         #     )
+        # with f7:
+        #     render_metric_card(
+        #         "총 측정 시간",
+        #         session["total_elapsed_time_text"],
+        #         "",
+        #         "#173a6a",
+        #         "⏱"
+        #     )
+
+        st.write("")
+
+        # fatigue_dist_df = make_fatigue_distribution_df(fatigue_summary["fatigue_label_seconds"])
+        # fd_left, fd_right = st.columns(2)
+
+
+        # with fd_left:
+        #     render_donut_chart(
+        #         fatigue_dist_df,
+        #         title="피로 상태 분포",
+        #         center_text="피로\n분포"
+        #     )
+
+        # with fd_right:
+        #     fatigue_rows = []
+        #     total_fatigue_sec = sum(fatigue_summary["fatigue_label_seconds"].values())
+
+        #     for _, row in fatigue_dist_df.iterrows():
+        #         ratio = (row["seconds"] / total_fatigue_sec) if total_fatigue_sec > 0 else 0
+        #         fatigue_rows.append([
+        #             row["name"],
+        #             seconds_to_text(int(row["seconds"])),
+        #             format_percent_from_ratio(ratio)
+        #         ])
+
+        #     render_pretty_table(
+        #         title="피로 상태 비율 표",
+        #         columns=["상태", "누적 시간", "비율"],
+        #         rows=fatigue_rows
+        #     )
+
+        st.markdown('<div class="section-title">피로도 세부 지표</div>', unsafe_allow_html=True)
+
+        # fatigue_metric = fatigue_summary["metric_summary"]
+        # render_pretty_table(
+        #     title="피로도 지표 요약",
+        #     columns=["지표", "평균", "최대"],
+        #     rows=[
+        #         [
+        #             "눈 감김 비율",
+        #             format_number(fatigue_metric.get("avg_eye_closed_ratio")),
+        #             format_number(fatigue_metric.get("max_eye_closed_ratio"))
+        #         ],
+        #         [
+        #             "연속 눈 감김 시간",
+        #             format_number(fatigue_metric.get("avg_eye_closed_duration")),
+        #             format_number(fatigue_metric.get("max_eye_closed_duration"))
+        #         ],
+        #         [
+        #             "입 벌림 비율",
+        #             format_number(fatigue_metric.get("avg_mouth_open_ratio")),
+        #             format_number(fatigue_metric.get("max_mouth_open_ratio"))
+        #         ]
+        #     ]
+        # )
+
+        if not minute_df.empty:
+            st.write("")
+
+            fatigue_time_unit_min = st.selectbox(
+                "그래프 시간 단위",
+                options=[5, 10, 15, 30],
+                index=0,
+                key="fatigue_time_unit_min"
+            )
+
+
+            render_line_chart(
+                minute_df,
+                x_col="minute_label",
+                y_specs=[{"col": "drowsy_ratio_percent", "name": "피로 경고 비율", "color": "#8b5cf6"},],
+                title=f"{fatigue_time_unit_min}분 단위 피로 의심 비율 최고값",
+                y_suffix="%",
+                unit_min=fatigue_time_unit_min
+                )
+
+            # ff1, ff2 = st.columns(2)
+
+            # with ff1:
+            #     render_line_chart(
+            #         minute_df,
+            #         x_col="minute_label",
+            #         y_specs=[
+            #             {"col": "drowsy_ratio_percent", "name": "피로 경고 비율", "color": "#8b5cf6"},
+            #         ],
+            #         title=f"{fatigue_time_unit_min}분 단위 피로 의심 비율 최고값",
+            #         y_suffix="%",
+            #         unit_min=fatigue_time_unit_min
+            #     )
+
+            # with ff2:
+            #     render_line_chart(
+            #         minute_df,
+            #         x_col="minute_label",
+            #         y_specs=[
+            #             {"col": "avg_eye_closed_ratio", "name": "눈 감김 비율", "color": "#6366f1"},
+            #             {"col": "avg_mouth_open_ratio", "name": "입 벌림 비율", "color": "#f97316"},
+            #         ],
+            #         title=f"{fatigue_time_unit_min}분 단위 눈 감김 / 입 벌림 최고값",
+            #         unit_min=fatigue_time_unit_min
+            #     )
 
 
 # ------------------------------------------------------------

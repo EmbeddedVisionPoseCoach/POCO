@@ -1,0 +1,102 @@
+{
+  "geometry": {
+    "shoulder_x_m": 0.0,
+    "shoulder_z_m": 0.13560595853519858,
+    "upper_link_m": 0.11600002112068773,
+    "lower_link_m": 0.13500018518505816,
+    "upper_zero_angle_rad": 1.3270094336148002,
+    "lower_zero_angle_rad": 0.03852799684213844,
+    "monitor_offset_m": 0.07
+  },
+  "distance": {
+    "desired_user_monitor_distance_m": 0.5,
+    "deadband_m": 0.008,
+    "max_monitor_x_step_m": 0.02
+  },
+  "tof": {
+    "mode": "hardware",
+    "i2c_bus": 3,
+    "i2c_address": 41,
+    "sample_hz": 20.0,
+    "minimum_range_m": 0.03,
+    "maximum_range_m": 2.0,
+    "filter_alpha": 0.25,
+    "io_timeout_sec": 0.2,
+    "sensor_origin_x_m": 0.0,
+    "fixed_range_m": 0.732848052197525,
+    "minimum_user_x_m": 0.58,
+    "maximum_user_x_m": 0.8307655
+  },
+  "fusion": {
+    "tof_weight": 1.0,
+    "vision_weight": 0.0,
+    "minimum_eye_gap_px": 5.0,
+    "minimum_vision_distance_m": 0.25,
+    "maximum_vision_distance_m": 1.2,
+    "vision_filter_alpha": 0.25
+  },
+  "control": {
+    "command_hz": 20.0,
+    "trajectory_reference_hz": 5.0,
+    "speed": 20,
+    "acc": 5,
+    "manual_test_speed_cap": 100,
+    "vertical_ik_speed": 1000,
+    "vertical_ik_acc": 30,
+    "vertical_ik_speed_mode": "adaptive",
+    "vertical_ik_variable_min_speed": 1000,
+    "vertical_ik_variable_full_speed_error_deg": 30.0,
+    "working_start_arrival_tolerance_deg": 3.0,
+    "working_start_stable_samples": 2,
+    "working_start_timeout_sec": 25.0,
+    "preparation_arrival_tolerance_deg": 3.0,
+    "preparation_arrival_stable_samples": 2,
+    "preparation_movement_timeout_sec": 25.0,
+    "pose_speed": 800,
+    "pose_acc": 20,
+    "pose_speed_mode": "adaptive",
+    "pose_joint_command_mode": "direct",
+    "pose_variable_min_speed": 150,
+    "pose_variable_full_speed_error_deg": 30.0
+  },
+  "postures": {
+    "working": {
+      "shoulder_lift_deg": 0.0,
+      "elbow_flex_deg": 0.0
+    },
+    "rest": {
+      "shoulder_lift_deg": 107.75,
+      "elbow_flex_deg": -92.55,
+      "speed_cap": 200,
+      "acc_cap": 10
+    }
+  },
+  "manual_cartesian": {
+    "user_x_min_m": 0.58,
+    "user_x_max_m": 0.8307655,
+    "monitor_z_min_m": 0.2,
+    "monitor_z_max_m": 0.3,
+    "default_monitor_z_m": 0.2560722511328793
+  },
+  "safety": {
+    "presence_min_m": 0.3,
+    "presence_max_m": 1.5,
+    "absence_timeout_sec": 5.0,
+    "reacquire_stable_sec": 1.0,
+    "posture_confidence_min": 0.7,
+    "posture_stale_sec": 1.0,
+    "soft_joint_limits_deg": {
+      "shoulder_lift": {
+        "min": -80.0,
+        "max": 85.0
+      },
+      "elbow_flex": {
+        "min": -80.0,
+        "max": 80.0
+      }
+    },
+    "vertical_tolerance_m": 0.03,
+    "max_joint_step_deg": 5.0,
+    "path_samples": 30
+  }
+}

@@ -8,10 +8,10 @@ from typing import Any, Dict, Optional
 # ------------------------------------------------------------
 
 # 현재 파일:
-# WorkSpace/preprocess/report_writer.py
+# WorkSpace/streamlit/preprocess/report_writer.py
 #
-# parents[1] = WorkSpace
-BASE_DIR = Path(__file__).resolve().parents[1]
+# parents[2] = WorkSpace
+BASE_DIR = Path(__file__).resolve().parents[2]
 
 REPORT_DIR = BASE_DIR / "data" / "reports"
 DEFAULT_REPORT_PATH = REPORT_DIR / "report_summary.json"
@@ -22,9 +22,9 @@ DEFAULT_REPORT_PATH = REPORT_DIR / "report_summary.json"
 # ------------------------------------------------------------
 
 try:
-    from workspace.preprocess.data_loader import load_posture_log
-    from workspace.preprocess.summary_builder import build_report_summary
-except ModuleNotFoundError:
+    from .data_loader import load_posture_log
+    from .summary_builder import build_report_summary
+except ImportError:
     from data_loader import load_posture_log
     from summary_builder import build_report_summary
 

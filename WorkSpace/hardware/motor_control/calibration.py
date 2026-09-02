@@ -225,7 +225,20 @@ class CalibrationManager:
     # 팀원용 각도 -> raw Position
     # ========================================================
 
-    def command_angle_to_position(self, joint_name, angle_deg):
+    def command_angle_to_position_absolute_only(
+        self,
+        joint_name,
+        angle_deg,
+    ):
+        """확인된 특수 자세를 STS 절대범위까지만 검사해 Position으로 변환한다.
+
+        일반 팀원용 이동에는 사용하지 않는다.
+
+        Rest/Recovery처럼 Motor12Controller에서 별도 안전검사를 끝낸
+        특수 자세만 이 경로를 사용한다. Calibration Safe Range는
+        의도적으로 검사하지 않지만 STS3215의 절대 Position 0~4095와
+        Position Calibration 완료 여부는 반드시 검사한다.
+        """
         servo = self.require_position_calibrated(joint_name)
 
         try:
@@ -237,10 +250,9 @@ class CalibrationManager:
         calibration_direction = int(servo["direction"])
         command_direction = int(COMMAND_TO_URDF_DIRECTION[joint_name])
 
-        # 팀원용 각도 -> URDF 각도
-        urdf_angle_deg = angle_deg * command_direction
+        # 기존 일반 각도 변환과 방향 계산은 완전히 동일하다.
+        urdf_angle_deg = (angle_deg * command_direction)
 
-        # URDF 각도 -> STS raw Position
         target_position = int(
             round(
                 zero_position
@@ -250,7 +262,33 @@ class CalibrationManager:
             )
         )
 
-        self.validate_target_position(joint_name, target_position)
+        # Calibration Safe Range만 생략한다.
+        # Servo 자체의 절대 Position 범위는 절대 우회하지 않는다.
+        if not (
+            STS_POSITION_MIN
+            <= target_position
+            <= STS_POSITION_MAX
+        ):
+            raise CalibrationError(
+                f"{joint_name} STS Position 범위 초과: "
+                f"{target_position}"
+            )
+
+        return target_position
+
+    def command_angle_to_position(
+        self,
+        joint_name,
+        angle_deg,
+    ):
+        """일반 팀원용 각도를 안전 검증된 raw Position으로 변환한다."""
+        target_position = (
+            self.command_angle_to_position_absolute_only(joint_name, angle_deg, )
+        )
+
+        # 일반 이동에서는 기존과 동일하게 Calibration Safe Range까지 검사한다.
+        self.validate_target_position(joint_name, target_position, )
+
         return target_position
 
     # ========================================================

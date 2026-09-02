@@ -6,18 +6,22 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from services.hardware_constants import (
-    IMU_DEADBAND_DEG,
+    IMU_DEADBAND_G,
     IMU_LPF_ALPHA,
+    MOTOR34_AUTO_ACC,
+    MOTOR34_AUTO_SPEED,
+    MOTOR34_COMMAND_HZ,
+    MOTOR3_IMU_Y_DIRECTION_SIGN,
+    MOTOR3_IMU_Y_KD,
+    MOTOR3_IMU_Y_KI,
+    MOTOR3_IMU_Y_KP,
+    MOTOR4_IMU_X_DIRECTION_SIGN,
+    MOTOR4_IMU_X_KD,
+    MOTOR4_IMU_X_KI,
+    MOTOR4_IMU_X_KP,
     PID_DERIVATIVE_LPF_ALPHA,
-    PID_INTEGRAL_LIMIT_RAD_SEC,
+    PID_INTEGRAL_LIMIT_G_SEC,
     PID_OUTPUT_LIMIT_DEG_S,
-    PID_OUTPUT_LPF_ALPHA,
-    PITCH_KD,
-    PITCH_KI,
-    PITCH_KP,
-    ROLL_KD,
-    ROLL_KI,
-    ROLL_KP,
 )
 
 
@@ -25,14 +29,18 @@ WORKSPACE_DIR = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG_PATH = WORKSPACE_DIR / "data" / "settings" / "hardware_control.json"
 
 
-# 하드웨어 배선/통신 기본값(IR pin, I2C bus/address, sample Hz 등)은
-# hardware_constants.py에만 둔다. JSON에는 PyQt에서 실제로 조절할 값만 저장한다.
+# ============================================================
+# Version 5 = Direct IMU X/Y -> Motor3/4 / V1.9 parity
+# ============================================================
 DEFAULT_HARDWARE_CONFIG = {
-    "version": 3,
+    "version": 5,
     "calibration": {
         "imu": {
-            "pitch_offset_deg": 0.0,
-            "roll_offset_deg": 0.0,
+            # 기록용. 새 Process 시작 시 자동 활성화하지 않는다.
+            "x_reference_g": 0.0,
+            "y_reference_g": 0.0,
+            "x_reference_raw": 0.0,
+            "y_reference_raw": 0.0,
             "sample_count": 0,
             "calibrated_at": None,
         }
@@ -40,26 +48,34 @@ DEFAULT_HARDWARE_CONFIG = {
     "control": {
         "imu": {
             "lpf_alpha": IMU_LPF_ALPHA,
-            "deadband_deg": IMU_DEADBAND_DEG,
+            "deadband_g": IMU_DEADBAND_G,
         },
         "pid": {
-            "pitch": {"kp": PITCH_KP, "ki": PITCH_KI, "kd": PITCH_KD},
-            "roll": {"kp": ROLL_KP, "ki": ROLL_KI, "kd": ROLL_KD},
+            "motor3_imu_y": {
+                "kp": MOTOR3_IMU_Y_KP,
+                "ki": MOTOR3_IMU_Y_KI,
+                "kd": MOTOR3_IMU_Y_KD,
+            },
+            "motor4_imu_x": {
+                "kp": MOTOR4_IMU_X_KP,
+                "ki": MOTOR4_IMU_X_KI,
+                "kd": MOTOR4_IMU_X_KD,
+            },
             "output_limit_deg_s": PID_OUTPUT_LIMIT_DEG_S,
-            "integral_limit_rad_sec": PID_INTEGRAL_LIMIT_RAD_SEC,
+            "integral_limit_g_s": PID_INTEGRAL_LIMIT_G_SEC,
             "derivative_lpf_alpha": PID_DERIVATIVE_LPF_ALPHA,
-            "output_lpf_alpha": PID_OUTPUT_LPF_ALPHA,
         },
         "motor": {
-            "command_hz": 10.0,
-            "pid_speed_deadband_deg_s": 0.25,
+            "command_hz": MOTOR34_COMMAND_HZ,
+            "auto_speed": MOTOR34_AUTO_SPEED,
+            "auto_acc": MOTOR34_AUTO_ACC,
             "motor3": {
                 "enabled": True,
-                "direction_sign": 1.0,
+                "direction_sign": MOTOR3_IMU_Y_DIRECTION_SIGN,
             },
             "motor4": {
                 "enabled": True,
-                "direction_sign": 1.0,
+                "direction_sign": MOTOR4_IMU_X_DIRECTION_SIGN,
             },
         },
     },
@@ -79,54 +95,59 @@ def _clamp(value, minimum, maximum):
     return max(minimum, min(float(value), maximum))
 
 
-def _normalize_legacy_loaded(data):
-    """예전 JSON을 읽어도 새 구조로 자동 정리한다.
+def _normalize_loaded(data):
+    """저장된 config를 V1.9 parity v5 구조로 마이그레이션한다.
 
-    예전 control.ir 및 control.imu의 bus/address/sample_hz/calibration_sec는
-    이제 코드 상수가 기준이므로 버린다. lpf/deadband만 유지한다.
+    v5에서 중요한 점
+    -------------
+    POCO MotorController는 TEAM angle -> URDF 변환에서 -1을 한 번 더 적용한다.
+    따라서 standalone tuner의 실제 raw 방향과 맞추기 위해 Motor3/4 control sign을
+    +1/+1로 바꿨다. 또한 예전 v4 JSON에 남아 있던 alpha=0.20, sign=-1 등
+    stale tuning이 새 코드 기본값을 다시 덮어쓰지 못하도록 v5 미만 config의
+    control block은 검증된 V1.9 기본값으로 1회 초기화한다.
+
+    보존 항목
+    --------
+    - calibration 기록
+    - Motor3/4 enabled 상태
     """
     if not isinstance(data, dict):
         return {}
 
     data = copy.deepcopy(data)
-    control = data.get("control")
-    if not isinstance(control, dict):
+    version = int(data.get("version", 0) or 0)
+
+    if version >= 5:
         return data
 
-    old_imu = control.get("imu")
-    if isinstance(old_imu, dict):
-        control["imu"] = {
-            key: old_imu[key]
-            for key in ("lpf_alpha", "deadband_deg")
-            if key in old_imu
-        }
+    migrated = copy.deepcopy(DEFAULT_HARDWARE_CONFIG)
 
-    control.pop("ir", None)
+    # Calibration 기록은 보존한다. 세션 시작 시 실제 Calibration 절차는 별도다.
+    old_calibration = data.get("calibration", {})
+    if isinstance(old_calibration, dict):
+        old_imu_cal = old_calibration.get("imu")
+        if isinstance(old_imu_cal, dict):
+            migrated["calibration"]["imu"].update(copy.deepcopy(old_imu_cal))
 
-    # v2까지 Motor4는 미구현(pass) 상태였으므로, v3에서는 실제 제어가
-    # 기본 활성화되도록 자동 마이그레이션한다. 사용자가 v3 이후 직접
-    # disabled로 저장한 값은 그대로 존중한다.
-    version = int(data.get("version", 0) or 0)
-    motor = control.get("motor")
-    if isinstance(motor, dict):
-        motor4 = motor.get("motor4")
-        if isinstance(motor4, dict):
-            if version < 3 or motor4.get("pass") is True:
-                motor4["enabled"] = True
-            motor4.pop("pass", None)
-            motor4.setdefault("direction_sign", 1.0)
+    # 사용자가 Motor3/4 자체를 꺼둔 상태만 보존한다.
+    old_control = data.get("control", {})
+    old_motor = old_control.get("motor", {}) if isinstance(old_control, dict) else {}
+    if isinstance(old_motor, dict):
+        for motor_key in ("motor3", "motor4"):
+            old_axis = old_motor.get(motor_key)
+            if isinstance(old_axis, dict) and "enabled" in old_axis:
+                migrated["control"]["motor"][motor_key]["enabled"] = bool(
+                    old_axis["enabled"]
+                )
 
-    return data
+    # 그 외 control 값은 모두 현재 V1.9 parity 기본값 사용:
+    # alpha=.08 / deadband=.010g / Kp=120 / limit=24deg/s /
+    # command=100Hz / speed=500 / acc=12 / POCO sign=+1,+1
+    return migrated
 
 
 class HardwareConfigService:
-    """PID/Filter/Motor tuning + IMU Calibration 기록 전용 JSON 관리자.
-
-    구분
-      - hardware_constants.py: 배선/통신/샘플링 등 개발자 고정값
-      - hardware_control.json: PyQt에서 변경 가능한 튜닝값
-      - servo_calibration_result.json: Servo 기계적 Calibration
-    """
+    """Direct IMU PID / Filter / Motor3/4 tuning + Calibration 기록 JSON 관리자."""
 
     def __init__(self, path=DEFAULT_CONFIG_PATH):
         self.path = Path(path)
@@ -147,7 +168,7 @@ class HardwareConfigService:
         with self.path.open("r", encoding="utf-8") as file:
             loaded = json.load(file)
 
-        loaded = _normalize_legacy_loaded(loaded)
+        loaded = _normalize_loaded(loaded)
         data = self.create_default()
         if isinstance(loaded, dict):
             _deep_merge(data, loaded)
@@ -202,7 +223,7 @@ class HardwareConfigService:
         if not isinstance(patch, dict):
             raise TypeError("Hardware config patch는 dict여야 합니다.")
         data = self.load()
-        _deep_merge(data, _normalize_legacy_loaded(patch))
+        _deep_merge(data, _normalize_loaded(patch) if "version" in patch else patch)
         return self.save(data)
 
     def update_control(self, patch):
@@ -210,11 +231,20 @@ class HardwareConfigService:
             raise TypeError("control patch는 dict여야 합니다.")
         return self.update({"control": patch})
 
-    def update_imu_calibration(self, pitch_offset_deg, roll_offset_deg, sample_count=0):
+    def update_imu_calibration(
+        self,
+        x_reference_g,
+        y_reference_g,
+        sample_count=0,
+        x_reference_raw=0.0,
+        y_reference_raw=0.0,
+    ):
         data = self.load()
         calibration = data["calibration"]["imu"]
-        calibration["pitch_offset_deg"] = float(pitch_offset_deg)
-        calibration["roll_offset_deg"] = float(roll_offset_deg)
+        calibration["x_reference_g"] = float(x_reference_g)
+        calibration["y_reference_g"] = float(y_reference_g)
+        calibration["x_reference_raw"] = float(x_reference_raw)
+        calibration["y_reference_raw"] = float(y_reference_raw)
         calibration["sample_count"] = int(sample_count)
         calibration["calibrated_at"] = datetime.now(timezone.utc).isoformat()
         return self.save(data)
@@ -231,7 +261,10 @@ class HardwareConfigService:
         data = self.create_default()
         if preserve_imu_calibration:
             data["calibration"]["imu"] = copy.deepcopy(
-                previous.get("calibration", {}).get("imu", data["calibration"]["imu"])
+                previous.get("calibration", {}).get(
+                    "imu",
+                    data["calibration"]["imu"],
+                )
             )
         return self.save(data)
 
@@ -239,28 +272,55 @@ class HardwareConfigService:
         if not isinstance(data, dict):
             raise ValueError("Hardware config root는 object여야 합니다.")
 
-        data["version"] = 3
+        data["version"] = 5
 
         calibration = data.setdefault("calibration", {}).setdefault("imu", {})
-        calibration["pitch_offset_deg"] = float(calibration.get("pitch_offset_deg", 0.0))
-        calibration["roll_offset_deg"] = float(calibration.get("roll_offset_deg", 0.0))
+        calibration["x_reference_g"] = float(calibration.get("x_reference_g", 0.0))
+        calibration["y_reference_g"] = float(calibration.get("y_reference_g", 0.0))
+        calibration["x_reference_raw"] = float(calibration.get("x_reference_raw", 0.0))
+        calibration["y_reference_raw"] = float(calibration.get("y_reference_raw", 0.0))
         calibration["sample_count"] = max(0, int(calibration.get("sample_count", 0)))
         calibrated_at = calibration.get("calibrated_at")
         calibration["calibrated_at"] = calibrated_at if calibrated_at else None
 
-        control = data.setdefault("control", {})
-        control.pop("ir", None)
+        # 과거 Pitch/Roll calibration key가 섞여 있으면 제거.
+        for old_key in ("pitch_offset_deg", "roll_offset_deg"):
+            calibration.pop(old_key, None)
 
+        control = data.setdefault("control", {})
         imu = control.setdefault("imu", {})
-        imu["lpf_alpha"] = _clamp(imu.get("lpf_alpha", IMU_LPF_ALPHA), 0.0, 1.0)
-        imu["deadband_deg"] = max(0.0, float(imu.get("deadband_deg", IMU_DEADBAND_DEG)))
+        imu["lpf_alpha"] = _clamp(
+            imu.get("lpf_alpha", IMU_LPF_ALPHA),
+            0.01,
+            1.0,
+        )
+        imu["deadband_g"] = max(
+            0.0,
+            float(imu.get("deadband_g", IMU_DEADBAND_G)),
+        )
+        # 과거 단위가 다른 키 제거.
+        imu.pop("deadband_deg", None)
         for key in ("bus", "address", "sample_hz", "calibration_sec"):
             imu.pop(key, None)
 
         pid = control.setdefault("pid", {})
         for axis, defaults in (
-            ("pitch", {"kp": PITCH_KP, "ki": PITCH_KI, "kd": PITCH_KD}),
-            ("roll", {"kp": ROLL_KP, "ki": ROLL_KI, "kd": ROLL_KD}),
+            (
+                "motor3_imu_y",
+                {
+                    "kp": MOTOR3_IMU_Y_KP,
+                    "ki": MOTOR3_IMU_Y_KI,
+                    "kd": MOTOR3_IMU_Y_KD,
+                },
+            ),
+            (
+                "motor4_imu_x",
+                {
+                    "kp": MOTOR4_IMU_X_KP,
+                    "ki": MOTOR4_IMU_X_KI,
+                    "kd": MOTOR4_IMU_X_KD,
+                },
+            ),
         ):
             axis_cfg = pid.setdefault(axis, {})
             axis_cfg["kp"] = float(axis_cfg.get("kp", defaults["kp"]))
@@ -268,31 +328,54 @@ class HardwareConfigService:
             axis_cfg["kd"] = float(axis_cfg.get("kd", defaults["kd"]))
 
         pid["output_limit_deg_s"] = max(
-            0.1, float(pid.get("output_limit_deg_s", PID_OUTPUT_LIMIT_DEG_S))
+            0.1,
+            float(pid.get("output_limit_deg_s", PID_OUTPUT_LIMIT_DEG_S)),
         )
-        pid["integral_limit_rad_sec"] = max(
-            0.0, float(pid.get("integral_limit_rad_sec", PID_INTEGRAL_LIMIT_RAD_SEC))
+        pid["integral_limit_g_s"] = max(
+            0.0,
+            float(pid.get("integral_limit_g_s", PID_INTEGRAL_LIMIT_G_SEC)),
         )
         pid["derivative_lpf_alpha"] = _clamp(
-            pid.get("derivative_lpf_alpha", PID_DERIVATIVE_LPF_ALPHA), 0.0, 1.0
-        )
-        pid["output_lpf_alpha"] = _clamp(
-            pid.get("output_lpf_alpha", PID_OUTPUT_LPF_ALPHA), 0.0, 1.0
+            pid.get("derivative_lpf_alpha", PID_DERIVATIVE_LPF_ALPHA),
+            0.0,
+            1.0,
         )
 
+        # 과거 Pitch/Roll PID key 제거.
+        for old_key in (
+            "pitch",
+            "roll",
+            "integral_limit_rad_sec",
+            "output_lpf_alpha",
+        ):
+            pid.pop(old_key, None)
+
         motor = control.setdefault("motor", {})
-        motor["command_hz"] = max(1.0, float(motor.get("command_hz", 10.0)))
-        motor["pid_speed_deadband_deg_s"] = max(
-            0.0, float(motor.get("pid_speed_deadband_deg_s", 0.25))
+        motor["command_hz"] = max(
+            1.0,
+            float(motor.get("command_hz", MOTOR34_COMMAND_HZ)),
         )
+        motor["auto_speed"] = max(
+            1,
+            int(motor.get("auto_speed", MOTOR34_AUTO_SPEED)),
+        )
+        motor["auto_acc"] = max(
+            1,
+            int(motor.get("auto_acc", MOTOR34_AUTO_ACC)),
+        )
+        motor.pop("pid_speed_deadband_deg_s", None)
 
         motor3 = motor.setdefault("motor3", {})
         motor3["enabled"] = bool(motor3.get("enabled", True))
-        direction_sign = float(motor3.get("direction_sign", 1.0))
-        motor3["direction_sign"] = 1.0 if direction_sign >= 0.0 else -1.0
+        sign = float(
+            motor3.get("direction_sign", MOTOR3_IMU_Y_DIRECTION_SIGN)
+        )
+        motor3["direction_sign"] = 1.0 if sign >= 0.0 else -1.0
 
         motor4 = motor.setdefault("motor4", {})
         motor4["enabled"] = bool(motor4.get("enabled", True))
-        direction_sign = float(motor4.get("direction_sign", 1.0))
-        motor4["direction_sign"] = 1.0 if direction_sign >= 0.0 else -1.0
+        sign = float(
+            motor4.get("direction_sign", MOTOR4_IMU_X_DIRECTION_SIGN)
+        )
+        motor4["direction_sign"] = 1.0 if sign >= 0.0 else -1.0
         motor4.pop("pass", None)

@@ -1,67 +1,51 @@
+"""ADXL345 Direct X/Y PID 단독 디버그 도구."""
 import time
 
 from services.hardware_config_service import HardwareConfigService
 from services.imu_service import ADXL345IMUService
 
 
-def create_imu_from_config(control):
-    imu_cfg = control["imu"]
-    pid_cfg = control["pid"]
-    return ADXL345IMUService(
-        bus_number=imu_cfg["bus"],
-        address=imu_cfg["address"],
-        sample_hz=imu_cfg["sample_hz"],
-        calibration_sec=imu_cfg["calibration_sec"],
-        imu_alpha=imu_cfg["lpf_alpha"],
-        deadband_deg=imu_cfg["deadband_deg"],
-        pitch_pid=pid_cfg["pitch"],
-        roll_pid=pid_cfg["roll"],
-        output_limit_deg_s=pid_cfg["output_limit_deg_s"],
-        integral_limit_rad_sec=pid_cfg["integral_limit_rad_sec"],
-        derivative_alpha=pid_cfg["derivative_lpf_alpha"],
-        output_alpha=pid_cfg["output_lpf_alpha"],
-    )
-
-
 def main():
     config_service = HardwareConfigService()
-    config_data = config_service.load()
-    imu = create_imu_from_config(config_data["control"])
+    config = config_service.load()
+    control = config["control"]
+
+    imu = ADXL345IMUService()
+    imu.apply_control_config(control["imu"], control["pid"])
 
     if not imu.open():
-        print(f"IMU 초기화 실패: {imu.last_error}")
-        return
+        raise RuntimeError(f"IMU open fail: {imu.last_error}")
 
-    print("[DEBUG] IR 사전 확인은 생략합니다. 실앱에서는 반드시 IR -> IMU 순서입니다.")
+    print("[IMU DEBUG] CALIBRATION 시작")
     imu.start_calibration()
 
     try:
         while True:
             state = imu.update()
             result = imu.consume_calibration_result()
-            if result is not None:
-                saved = config_service.update_imu_calibration(
-                    result["pitch_offset_deg"],
-                    result["roll_offset_deg"],
-                    result["sample_count"],
-                )
-                print("[DEBUG] Offset JSON 저장:", saved["calibration"]["imu"])
 
-            if state["calibrating"]:
-                print(
-                    f"Offset Calibration... {state['calibration_remaining_sec']:.1f}s "
-                    f"samples={state['calibration_sample_count']} "
-                    f"raw=({state['raw_x']}, {state['raw_y']}, {state['raw_z']})"
+            if result is not None:
+                config_service.update_imu_calibration(
+                    result["x_reference_g"],
+                    result["y_reference_g"],
+                    result["sample_count"],
+                    x_reference_raw=result.get("x_reference_raw", 0.0),
+                    y_reference_raw=result.get("y_reference_raw", 0.0),
                 )
-            else:
                 print(
-                    f"Offset(P/R)=({state['pitch_offset_deg']:+6.2f}, "
-                    f"{state['roll_offset_deg']:+6.2f}) deg | "
-                    f"Pitch={state['pitch_deg']:+6.2f} deg "
-                    f"Roll={state['roll_deg']:+6.2f} deg | "
-                    f"PitchSpeed={state['correction_pitch_speed_deg_s']:+6.2f} deg/s "
-                    f"RollSpeed={state['correction_roll_speed_deg_s']:+6.2f} deg/s"
+                    "[IMU DEBUG] Calibration Saved "
+                    f"Xref={result['x_reference_g']:+.5f}g "
+                    f"Yref={result['y_reference_g']:+.5f}g"
                 )
+
+            print(
+                f"X={state.get('filtered_x_g', 0.0):+.5f}g "
+                f"dX={state.get('imu_x_error_g', 0.0):+.5f}g | "
+                f"Y={state.get('filtered_y_g', 0.0):+.5f}g "
+                f"dY={state.get('imu_y_error_g', 0.0):+.5f}g | "
+                f"M3(Y)={state.get('motor3_correction_speed_deg_s', 0.0):+.3f}deg/s "
+                f"M4(X)={state.get('motor4_correction_speed_deg_s', 0.0):+.3f}deg/s"
+            )
 
             time.sleep(imu.sample_interval)
 
@@ -69,7 +53,6 @@ def main():
         pass
     finally:
         imu.close()
-        print("IMU 종료")
 
 
 if __name__ == "__main__":

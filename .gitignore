@@ -221,5 +221,8 @@ __marimo__/
 WorkSpace/data/reports/*
 WorkSpace/data/session_log/*
 WorkSpace/data/settings/*
+WorkSpace/data/monitor_arm_evaluation/*
+WorkSpace/data/pose_evaluation/*
+WorkSpace/data/user_profiles/*
 WorkSpace/saved_model/baseline.pkl
 **/stservo_env/
