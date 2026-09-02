@@ -437,9 +437,6 @@ class Motor12Controller:
     def read_current_arm_state(self):
         """현재 Motor1/2 관절각과 그 자세의 모니터 위치를 함께 읽는다.
 
-        HardwareProcess의 ToF + Vision 사용자 위치 계산에서는
-        Vision 카메라 거리값을 base-user X로 바꾸기 위해 현재 모니터 X가 필요하다.
-
         Servo 현재각 읽기와 Forward Kinematics는 Motor12/Planner 영역에
         유지하고, HardwareProcess에는 계산된 현재 상태만 전달한다.
         """
@@ -837,7 +834,7 @@ class Motor12Controller:
     def move_to_rest(self):
         """확인된 Rest 특수 자세로 Motor1/2를 동시에 이동한다.
 
-        Rest 진입 후에는 일반 ToF/Vision 자동추종을 완전히 정지한다.
+        Rest 진입 후에는 일반 ToF 자동추종을 완전히 정지한다.
         Recovery는 resume_from_rest()가 명시적으로 호출된 뒤에만 시작한다.
         """
         if (
@@ -1065,16 +1062,16 @@ class Motor12Controller:
 
 
     def update(self, context):
-        """융합 user X를 이용해 Motor1/2 자동추종/Recovery를 수행한다.
+        """ToF user X를 이용해 Motor1/2 자동추종/Recovery를 수행한다.
 
         상태 계산과 Servo 궤적 명령을 20Hz로 수행한다. Vision/ToF는 별도
         주기로 최신값을 갱신하며, 이 Controller는 마지막 유효 목표를 재사용한다.
 
         제어 우선순위:
         1. Rest mode -> 완전 HOLD
-        2. ToF/Fusion invalid -> SAFE_HOLD
+        2. ToF invalid -> SAFE_HOLD
         3. 명시적으로 요청된 Recovery -> inward-only 복구
-        4. 정상 자세 -> 일반 ToF/Vision X 추종
+        4. 정상 자세 -> 일반 ToF X 추종
         """
         now = float(
             context.get(

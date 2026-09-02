@@ -10,7 +10,7 @@
   },
   "distance": {
     "desired_user_monitor_distance_m": 0.5,
-    "deadband_m": 0.015,
+    "deadband_m": 0.008,
     "max_monitor_x_step_m": 0.02
   },
   "tof": {
@@ -24,12 +24,12 @@
     "io_timeout_sec": 0.2,
     "sensor_origin_x_m": 0.0,
     "fixed_range_m": 0.732848052197525,
-    "minimum_user_x_m": 0.6007655,
+    "minimum_user_x_m": 0.58,
     "maximum_user_x_m": 0.8307655
   },
   "fusion": {
-    "tof_weight": 0.7,
-    "vision_weight": 0.3,
+    "tof_weight": 1.0,
+    "vision_weight": 0.0,
     "minimum_eye_gap_px": 5.0,
     "minimum_vision_distance_m": 0.25,
     "maximum_vision_distance_m": 1.2,
@@ -46,11 +46,11 @@
     "vertical_ik_speed_mode": "adaptive",
     "vertical_ik_variable_min_speed": 1000,
     "vertical_ik_variable_full_speed_error_deg": 30.0,
-    "working_start_arrival_tolerance_deg": 1.0,
-    "working_start_stable_samples": 3,
+    "working_start_arrival_tolerance_deg": 3.0,
+    "working_start_stable_samples": 2,
     "working_start_timeout_sec": 25.0,
-    "preparation_arrival_tolerance_deg": 1.0,
-    "preparation_arrival_stable_samples": 3,
+    "preparation_arrival_tolerance_deg": 3.0,
+    "preparation_arrival_stable_samples": 2,
     "preparation_movement_timeout_sec": 25.0,
     "pose_speed": 800,
     "pose_acc": 20,
@@ -72,7 +72,7 @@
     }
   },
   "manual_cartesian": {
-    "user_x_min_m": 0.6007655,
+    "user_x_min_m": 0.58,
     "user_x_max_m": 0.8307655,
     "monitor_z_min_m": 0.2,
     "monitor_z_max_m": 0.3,
@@ -88,7 +88,7 @@
     "soft_joint_limits_deg": {
       "shoulder_lift": {
         "min": -80.0,
-        "max": 80.0
+        "max": 85.0
       },
       "elbow_flex": {
         "min": -80.0,

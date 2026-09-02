@@ -1,4 +1,4 @@
-"""RPi 실물 없이 IMU / ToF-Vision / Motor1~4 / Rest-Recovery 핵심 경로를 검증하는 self-test."""
+"""RPi 실물 없이 IMU / ToF 추종 / Motor1~4 / Rest-Recovery 핵심 경로를 검증하는 self-test."""
 import json
 import tempfile
 import time
@@ -254,11 +254,11 @@ def main():
     )
     assert (
         monitor_arm_settings["control"]["working_start_arrival_tolerance_deg"]
-        == 1.0
+        == 3.0
     )
     assert (
         monitor_arm_settings["control"]["working_start_stable_samples"]
-        == 3
+        == 2
     )
     assert (
         monitor_arm_settings["control"]["working_start_timeout_sec"]
@@ -266,24 +266,34 @@ def main():
     )
     assert (
         monitor_arm_settings["control"]["preparation_arrival_tolerance_deg"]
-        == 1.0
+        == 3.0
     )
     assert (
         monitor_arm_settings["control"]["preparation_arrival_stable_samples"]
-        == 3
+        == 2
     )
     assert (
         monitor_arm_settings["control"]["preparation_movement_timeout_sec"]
         == 25.0
     )
+    assert monitor_arm_settings["fusion"]["tof_weight"] == 1.0
+    assert monitor_arm_settings["fusion"]["vision_weight"] == 0.0
+    assert monitor_arm_settings["distance"]["deadband_m"] == 0.008
+    assert monitor_arm_settings["tof"]["minimum_user_x_m"] == 0.58
+    assert monitor_arm_settings["manual_cartesian"]["user_x_min_m"] == 0.58
+    assert (
+        monitor_arm_settings["safety"]["soft_joint_limits_deg"]
+        ["shoulder_lift"]["max"]
+        == 85.0
+    )
 
-    # 0.25°보다 크지만 설정 허용치 안인 실제 정지 오차도
-    # 연속 3개 샘플에서만 도착으로 확정해야 한다.
+    # 디스플레이 하중으로 1°보다 큰 정지 오차가 남아도 3° 이내이면
+    # 연속 2개 샘플에서 도착으로 확정한다.
     arrival_planner = MonitorArmPlanner(monitor_arm_settings)
     arrival_planner.working_command = JointCommand(0.0, 0.0)
     arrival_planner.request_working_pose_recovery()
-    near_target = JointCommand(0.8, -0.7)
-    outside_target = JointCommand(1.2, -0.7)
+    near_target = JointCommand(2.5, -2.2)
+    outside_target = JointCommand(3.2, -2.2)
     assert arrival_planner.plan(near_target, user_x_m=0.73) is None
     assert arrival_planner.recovery_active is True
     assert arrival_planner.recovery_stable_sample_count == 1
@@ -292,10 +302,8 @@ def main():
     assert arrival_planner.plan(near_target, user_x_m=0.73) is None
     assert arrival_planner.recovery_active is True
     assert arrival_planner.plan(near_target, user_x_m=0.73) is None
-    assert arrival_planner.recovery_active is True
-    assert arrival_planner.plan(near_target, user_x_m=0.73) is None
     assert arrival_planner.recovery_active is False
-    assert arrival_planner.recovery_stable_sample_count == 3
+    assert arrival_planner.recovery_stable_sample_count == 2
 
     # --------------------------------------------------------
     # ToF / Vision / User-X Fusion
@@ -341,6 +349,61 @@ def main():
         tof_source.read_user_x_m()
         - 0.72
     ) < 1e-9
+
+    # 센서 자체는 정상인데 제어 가동범위보다 가까운 사용자는 SAFE_HOLD로
+    # 버리지 않고 가장 뒤쪽 작업 목표로 포화해야 한다.
+    tof_service.fixed_range_m = 0.50
+    raw_close_user_x = tof_source.read_raw_user_x_m()
+    assert abs(raw_close_user_x - 0.52) < 1e-9
+    clamped_close_user_x = tof_source.clamp_user_x_m(raw_close_user_x)
+    assert abs(clamped_close_user_x - 0.60) < 1e-9
+
+    close_planner = MonitorArmPlanner(monitor_arm_settings)
+    extended = JointCommand(20.0, -10.0)
+    extended_pose = close_planner.kinematics.forward(extended)
+    close_planner.reference_z_m = extended_pose.z_m
+    retract_target = close_planner.plan(
+        extended,
+        clamped_close_user_x,
+        max_x_step_m=0.005,
+    )
+    assert retract_target is not None
+    assert (
+        close_planner.kinematics.forward(retract_target).x_m
+        < extended_pose.x_m
+    )
+    tof_service.fixed_range_m = 0.70
+
+    # 실 설정의 가까운 한계에서는 기존 작업 위치(약 10.3cm)보다 뒤쪽인
+    # 약 8cm 목표가 생성되고, 0.8cm deadband에도 묻히지 않아야 한다.
+    configured_tof_source = ToFUserXSource(
+        sensor_service=tof_service,
+        sensor_origin_x_m=0.0,
+        minimum_user_x_m=monitor_arm_settings["tof"]["minimum_user_x_m"],
+        maximum_user_x_m=monitor_arm_settings["tof"]["maximum_user_x_m"],
+    )
+    tof_service.fixed_range_m = 0.50
+    configured_close_x = configured_tof_source.clamp_user_x_m(
+        configured_tof_source.read_raw_user_x_m()
+    )
+    assert configured_close_x == 0.58
+    configured_planner = MonitorArmPlanner(monitor_arm_settings)
+    loaded_working = JointCommand(69.43, -57.13)
+    configured_planner.reference_z_m = (
+        configured_planner.kinematics.forward(loaded_working).z_m
+    )
+    configured_target = configured_planner.plan(
+        loaded_working,
+        configured_close_x,
+        max_x_step_m=0.005,
+    )
+    assert configured_target is not None
+    configured_target_pose = configured_planner.kinematics.forward(
+        configured_target
+    )
+    assert configured_target_pose.x_m < 0.1029
+    assert configured_target.shoulder_lift_deg <= 85.0
+    tof_service.fixed_range_m = 0.70
 
     # POCO PoseProcess와 같은 [x, y, z, visibility] landmark 형식.
     landmarks = [
@@ -840,7 +903,7 @@ def main():
                 break
 
         assert recovery_complete
-        assert len(stabilizing_command_counts) == 2
+        assert len(stabilizing_command_counts) == 1
         assert len(set(stabilizing_command_counts)) == 1
 
         # Calibration 밖에서는 특수 SyncWrite가 실제 사용돼야 한다.
@@ -850,13 +913,13 @@ def main():
         assert len(fake.sync_moves) > regular_before_recovery
 
         assert (state12["recovery_active"] is False)
-        assert state12["recovery_stable_samples"] == 3
-        assert state12["recovery_required_stable_samples"] == 3
-        assert state12["recovery_arrival_tolerance_deg"] == 1.0
+        assert state12["recovery_stable_samples"] == 2
+        assert state12["recovery_required_stable_samples"] == 2
+        assert state12["recovery_arrival_tolerance_deg"] == 3.0
 
-        assert abs(fake.angles["shoulder_lift"]) <= 0.25
+        assert abs(fake.angles["shoulder_lift"]) <= 3.0
 
-        assert abs(fake.angles["elbow_flex"]) <= 0.25
+        assert abs(fake.angles["elbow_flex"]) <= 3.0
 
         # ====================================================
         # Motor3/4 기존 Direct IMU 테스트
@@ -966,8 +1029,8 @@ def main():
         # Smooth preparation arrival / timeout regression
         # ====================================================
         # Smooth working/manual IK is sent as one synchronized goal, so it does
-        # not use Planner recovery counters. A realistic 0.8° stop error must
-        # complete after three telemetry samples (the old 0.5° logic stuck).
+        # not use Planner recovery counters. A loaded display can leave a
+        # realistic 2.5° stop error, which completes after two samples.
         preparation.active = True
         preparation.connected = True
         preparation.target = JointCommand(0.0, 0.0)
@@ -977,15 +1040,15 @@ def main():
         preparation.movement_started_at = time.monotonic()
         preparation.arrival_stable_sample_count = 0
         preparation.movement_status = "moving"
-        fake.angles["shoulder_lift"] = 0.8
-        fake.angles["elbow_flex"] = -0.7
-        for _ in range(3):
+        fake.angles["shoulder_lift"] = 2.5
+        fake.angles["elbow_flex"] = -2.2
+        for _ in range(2):
             preparation.refresh_telemetry(force=True)
         preparation_state = preparation.snapshot()
         assert preparation_state["working_start_completed"] is True
         assert preparation_state["movement_active"] is False
         assert preparation_state["movement_status"] == "completed"
-        assert preparation_state["stable_samples"] == 3
+        assert preparation_state["stable_samples"] == 2
 
         # An unreachable goal must stop with a visible timeout instead of
         # leaving the UI in an endless "moving" state.
@@ -1050,9 +1113,9 @@ def main():
 
         motor.close()
 
-    print(
+print(
     "Hardware logic self-test: PASS "
-    "(IMU / ToF-Vision / Motor1~4 / Rest-Recovery / Profile-Auto-Ready)"
+    "(IMU / ToF-only tracking / Motor1~4 / Rest-Recovery / Profile-Auto-Ready)"
 )
 
 

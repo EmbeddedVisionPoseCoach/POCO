@@ -2,7 +2,6 @@ import json
 import time
 from pathlib import Path
 
-from modules.config import FRAME_HEIGHT, FRAME_WIDTH
 from modules.app_settings import AlarmSettings, SettingsManager
 
 from ipc.queue_utils import drain_ordered, get_latest, put_latest, put_ordered
@@ -19,10 +18,7 @@ from services.monitor_arm_preparation_controller import (
 from services.monitor_arm_kinematics import JointCommand
 from services.monitor_arm_safety_supervisor import MonitorArmSafetySupervisor
 from services.monitor_arm_user_x import (
-    EyeGapVisionDistanceEstimator,
     ToFUserXSource,
-    UserXFusion,
-    measure_pose_eye_gap,
 )
 from services.motor_service import MotorService
 from services.motor12_controller import Motor12Controller
@@ -182,9 +178,9 @@ def run_hardware_process(
     # --------------------------------------------------------
     # 실제 ToF I2C 통신은 tof_service.py가 담당하고,
     # 이 HardwareProcess에서는 거리값을 base-user X로 변환한 뒤
-    # 기존 Pose landmark의 눈 간격 기반 Vision 거리와 융합한다.
+    # 거리 추종 입력은 ToF만 사용한다. Pose landmark는 아래 안전 감독과
+    # 자세 분류에만 사용하며 사용자 X 계산에는 섞지 않는다.
     tof_cfg = monitor_arm_settings["tof"]
-    fusion_cfg = monitor_arm_settings.get("fusion", {},)
 
     tof_service = create_tof_service(tof_cfg)
 
@@ -201,48 +197,6 @@ def run_hardware_process(
         ),
         maximum_user_x_m=float(
             tof_cfg["maximum_user_x_m"]
-        ),
-    )
-
-    vision_estimator = EyeGapVisionDistanceEstimator(
-        minimum_eye_gap_px=float(
-            fusion_cfg.get(
-                "minimum_eye_gap_px",
-                5.0,
-            )
-        ),
-        minimum_distance_m=float(
-            fusion_cfg.get(
-                "minimum_vision_distance_m",
-                0.25,
-            )
-        ),
-        maximum_distance_m=float(
-            fusion_cfg.get(
-                "maximum_vision_distance_m",
-                1.2,
-            )
-        ),
-        filter_alpha=float(
-            fusion_cfg.get(
-                "vision_filter_alpha",
-                0.25,
-            )
-        ),
-    )
-
-    user_x_fusion = UserXFusion(
-        tof_weight=float(
-            fusion_cfg.get(
-                "tof_weight",
-                0.7,
-            )
-        ),
-        vision_weight=float(
-            fusion_cfg.get(
-                "vision_weight",
-                0.3,
-            )
         ),
     )
 
@@ -352,9 +306,11 @@ def run_hardware_process(
         "available": bool(tof_opened),
         "valid": False,
         "tof_user_x_m": None,
+        "tof_raw_user_x_m": None,
         "vision_user_x_m": None,
         "user_x_m": None,
         "fusion_mode": "SAFE_HOLD",
+        "control_saturated": False,
         "eye_gap_px": None,
         "last_error": (
             None
@@ -385,13 +341,6 @@ def run_hardware_process(
     # 자세 Alert가 같은 Pose frame을 중복 처리하지 않도록
     # 마지막으로 Alert 판단에 사용한 Pose frame ID를 기억한다.
     last_alert_pose_frame_id = None
-
-    # 같은 Pose frame을 빠른 Hardware loop에서 반복 처리하면
-    # Vision EMA가 한 프레임에 여러 번 적용될 수 있으므로
-    # 마지막 처리 frame과 Vision 결과를 별도 상태로 유지한다.
-    last_vision_pose_frame_id = None
-    latest_vision_user_x_m = None
-    latest_eye_gap_px = None
 
     monitor_arm_calibration = MonitorArmPreparationCalibrationService(
         duration_sec=5.0,
@@ -586,11 +535,6 @@ def run_hardware_process(
                             or calibration_state.get("motor_angles_deg")
                             or {}
                         )
-                        vision_estimator.calibrate(
-                            calibration_state["eye_gap_baseline_px"],
-                            calibration_state["user_monitor_distance_baseline_m"],
-                        )
-
                         required_joints = (
                             "shoulder_lift",
                             "elbow_flex",
@@ -1265,12 +1209,6 @@ def run_hardware_process(
                         calibration_state = monitor_arm_calibration.finish(metadata)
                         success = bool(calibration_state.get("session_ready", False))
                         if success:
-                            vision_estimator.calibrate(
-                                calibration_state["eye_gap_baseline_px"],
-                                calibration_state[
-                                    "user_monitor_distance_baseline_m"
-                                ],
-                            )
                             message = (
                                 "초기 준비 센서 평균 저장 완료: "
                                 f"ToF {calibration_state['tof_user_x_baseline_m']:.3f}m, "
@@ -1368,113 +1306,35 @@ def run_hardware_process(
                     )
 
             # ==================================================
-            # F-1. Motor1/2 ToF + Vision 사용자 X 계산
+            # F-1. Motor1/2 ToF 단독 사용자 X 계산
             # ==================================================
             tof_user_x_m = None
-            fused_user_x_m = None
+            tof_raw_user_x_m = None
+            control_user_x_m = None
             input_error = None
             fusion_mode = "SAFE_HOLD"
+            control_saturated = False
 
-            # 팀원 원본 안전정책:
-            # - ToF가 없으면 Vision 단독 Motor 제어 금지 → SAFE_HOLD
-            # - Vision이 없으면 ToF 단독 사용 가능
+            # 실제 ToF는 안전 존재범위(0.30~1.50m)에서 별도로 검사한다.
+            # 센서값이 정상이나 IK 제어범위 밖이면 가장 가까운 안전 목표로
+            # 포화하고, ToF 자체가 없거나 비정상이면 SAFE_HOLD한다.
             try:
-                tof_user_x_m = (
-                    tof_source.read_user_x_m()
+                tof_raw_user_x_m = tof_source.read_raw_user_x_m()
+                tof_user_x_m = tof_source.clamp_user_x_m(
+                    tof_raw_user_x_m
+                )
+                control_user_x_m = tof_user_x_m
+                control_saturated = bool(
+                    abs(tof_user_x_m - tof_raw_user_x_m) > 1e-9
+                )
+                fusion_mode = (
+                    "TOF_ONLY_LIMIT"
+                    if control_saturated
+                    else "TOF_ONLY"
                 )
 
             except ValueError as error:
-                # ToF가 유효하지 않으면 Vision 값을 사용하지 않는다.
-                latest_vision_user_x_m = None
-                latest_eye_gap_px = None
                 input_error = str(error)
-
-            else:
-                # Pose Process보다 Hardware loop가 훨씬 빠르므로
-                # 새 Pose frame에서만 Vision EMA를 한 번 갱신한다.
-                if (
-                    latest_pose_landmark_valid
-                    and latest_pose_frame_id
-                    != last_vision_pose_frame_id
-                ):
-                    last_vision_pose_frame_id = (
-                        latest_pose_frame_id
-                    )
-
-                    eye = measure_pose_eye_gap(
-                        latest_pose_landmarks,
-                        FRAME_WIDTH,
-                        FRAME_HEIGHT,
-                    )
-
-                    latest_eye_gap_px = (
-                        None
-                        if eye is None
-                        else float(eye.gap_px)
-                    )
-
-                    latest_vision_user_x_m = None
-
-                    if eye is not None:
-                        try:
-                            (
-                                _current_angles,
-                                current_monitor_pose,
-                            ) = motor12.read_current_arm_state()
-
-                            # 팀원 원본과 동일하게 첫 Vision 기준거리는
-                            # 현재 ToF user X - 현재 Monitor X로 보정한다.
-                            if not vision_estimator.calibrated:
-                                vision_estimator.calibrate(
-                                    eye.gap_px,
-                                    tof_user_x_m
-                                    - current_monitor_pose.x_m,
-                                )
-
-                            vision_distance_m = (
-                                vision_estimator
-                                .estimate_distance_m(
-                                    eye.gap_px
-                                )
-                            )
-
-                            latest_vision_user_x_m = float(
-                                current_monitor_pose.x_m
-                                + vision_distance_m
-                            )
-
-                        except (
-                            RuntimeError,
-                            ValueError,
-                        ):
-                            # 눈 landmark 또는 Motor 현재각이 순간적으로
-                            # 유효하지 않아도 ToF 단독 제어는 허용한다.
-                            latest_vision_user_x_m = None
-
-                elif not latest_pose_landmark_valid:
-                    latest_eye_gap_px = None
-                    latest_vision_user_x_m = None
-
-                try:
-                    fused_user_x_m = (
-                        tof_source.validate_user_x_m(
-                            user_x_fusion.fuse(
-                                tof_user_x_m,
-                                latest_vision_user_x_m,
-                            )
-                        )
-                    )
-
-                    fusion_mode = (
-                        "FUSED"
-                        if latest_vision_user_x_m
-                        is not None
-                        else "TOF_ONLY"
-                    )
-
-                except ValueError as error:
-                    fused_user_x_m = None
-                    input_error = str(error)
 
             latest_monitor_arm_input_state = {
                 "available": bool(
@@ -1485,15 +1345,15 @@ def run_hardware_process(
                     )
                 ),
                 "valid": (
-                    fused_user_x_m is not None
+                    control_user_x_m is not None
                 ),
                 "tof_user_x_m": tof_user_x_m,
-                "vision_user_x_m": (
-                    latest_vision_user_x_m
-                ),
-                "user_x_m": fused_user_x_m,
+                "tof_raw_user_x_m": tof_raw_user_x_m,
+                "vision_user_x_m": None,
+                "user_x_m": control_user_x_m,
                 "fusion_mode": fusion_mode,
-                "eye_gap_px": latest_eye_gap_px,
+                "control_saturated": control_saturated,
+                "eye_gap_px": None,
                 "last_error": input_error,
                 "timestamp": time.time(),
             }
@@ -1685,7 +1545,7 @@ def run_hardware_process(
                     "source": "PREPARATION_RECOVERY",
                 }
             # 준비 창에서는 오직 명시적인 Recovery/수동 IK만 허용한다.
-            # 일반 ToF/Vision 자동추종은 실제 자세 측정(MEASURING) 중에만 켜서
+            # 일반 ToF 자동추종은 실제 자세 측정(MEASURING) 중에만 켜서
             # 카메라/Process 초기화 직후 팔이 예기치 않게 움직이지 않게 한다.
             motor12_requested = bool(
                 not stop_rest_pending
@@ -1944,8 +1804,8 @@ def run_hardware_process(
                             "tof_user_x_m"
                         ),
                         "fusion_weights": {
-                            "tof": user_x_fusion.tof_weight,
-                            "vision": user_x_fusion.vision_weight,
+                            "tof": 1.0,
+                            "vision": 0.0,
                         },
                         "control_prerequisites_ready": bool(
                             monitor_arm_calibration.session_ready

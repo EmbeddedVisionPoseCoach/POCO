@@ -143,7 +143,6 @@ rfc3987==1.3.8
 roman==3.3
 rpi-keyboard-config==1.0
 rpi-lgpio==0.6
-RPi.GPIO==0.7.1
 rpi_ws281x==5.0.0
 RTIMULib==7.2.1
 scikit-learn==1.9.0

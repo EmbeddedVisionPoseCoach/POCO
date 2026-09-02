@@ -41,6 +41,7 @@ class ToFUserXSource:
         self.sensor_origin_x_m = float(sensor_origin_x_m)
         self.minimum_user_x_m = float(minimum_user_x_m)
         self.maximum_user_x_m = float(maximum_user_x_m)
+        self.last_raw_user_x_m: float | None = None
 
         if self.minimum_user_x_m > self.maximum_user_x_m:
             raise ValueError("ToF 사용자 X 최소값이 최대값보다 큽니다.")
@@ -51,10 +52,28 @@ class ToFUserXSource:
     def close(self) -> None:
         self.sensor_service.close()
 
-    def read_user_x_m(self) -> float:
+    def read_raw_user_x_m(self) -> float:
+        """Read finite base-user X without applying arm workspace limits."""
         range_m = float(self.sensor_service.read_distance_m())
         user_x_m = self.sensor_origin_x_m + range_m
+        if not math.isfinite(user_x_m):
+            raise ValueError("ToF 사용자 X가 유한한 값이 아닙니다.")
+        self.last_raw_user_x_m = user_x_m
+        return user_x_m
+
+    def read_user_x_m(self) -> float:
+        user_x_m = self.read_raw_user_x_m()
         return self.validate_user_x_m(user_x_m)
+
+    def clamp_user_x_m(self, user_x_m: float) -> float:
+        """Saturate a sensor value at the reachable monitor-arm workspace."""
+        user_x_m = float(user_x_m)
+        if not math.isfinite(user_x_m):
+            raise ValueError("ToF 사용자 X가 유한한 값이 아닙니다.")
+        return max(
+            self.minimum_user_x_m,
+            min(user_x_m, self.maximum_user_x_m),
+        )
 
     def validate_user_x_m(self, user_x_m: float) -> float:
         user_x_m = float(user_x_m)

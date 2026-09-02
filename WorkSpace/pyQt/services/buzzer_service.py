@@ -52,6 +52,8 @@ Hardware Process가 반복적으로 update()를 호출하면
 시간이 되었을 때만 PWM ON/OFF 상태를 변경한다.
 """
 
+import glob
+import re
 import time
 from collections import deque
 
@@ -80,6 +82,116 @@ STRONG_ALERT_ON_SEC = 0.100
 STRONG_ALERT_OFF_SEC = 0.100
 
 
+def _gpiochip_number(path):
+    match = re.search(r"gpiochip(\d+)$", str(path))
+    return None if match is None else int(match.group(1))
+
+
+def _open_user_gpiochip(lgpio_module, pin, device_paths=None):
+    """Open the gpiochip that owns the user-facing BCM header GPIOs.
+
+    Raspberry Pi 5 exposes those lines through the RP1 chip.  Its /dev suffix
+    is not stable across every kernel build, so selecting gpiochip0/4 by model
+    is insufficient.  Inspect each accessible chip and select ``pinctrl-rp1``.
+    Older Pi models fall back to another ``pinctrl-*`` chip with this line.
+    """
+    paths = list(device_paths) if device_paths is not None else glob.glob(
+        "/dev/gpiochip*"
+    )
+    paths.sort(key=lambda path: _gpiochip_number(path) or -1)
+    fallback = None
+    errors = []
+
+    for path in paths:
+        chip = _gpiochip_number(path)
+        if chip is None:
+            continue
+        handle = None
+        try:
+            handle = lgpio_module.gpiochip_open(chip)
+            info = lgpio_module.gpio_get_chip_info(handle)
+            line_count = int(info[1])
+            label = str(info[3])
+        except Exception as error:
+            if handle is not None:
+                try:
+                    lgpio_module.gpiochip_close(handle)
+                except Exception:
+                    pass
+            errors.append(f"gpiochip{chip}: {error}")
+            continue
+
+        if label == "pinctrl-rp1" and line_count > int(pin):
+            if fallback is not None:
+                lgpio_module.gpiochip_close(fallback[0])
+            return handle, chip, label
+
+        if fallback is None and label.startswith("pinctrl-") and line_count > int(pin):
+            fallback = (handle, chip, label)
+        else:
+            lgpio_module.gpiochip_close(handle)
+
+    if fallback is not None:
+        return fallback
+
+    detail = " / ".join(errors) if errors else "접근 가능한 gpiochip이 없습니다."
+    raise RuntimeError(f"사용자 GPIO 칩을 찾지 못했습니다: {detail}")
+
+
+class _LGPIOPWMDevice:
+    """Small value-compatible adapter around lgpio software PWM."""
+
+    def __init__(self, lgpio_module, handle, chip, label, pin, frequency_hz):
+        self._lgpio = lgpio_module
+        self._handle = handle
+        self.chip = int(chip)
+        self.label = str(label)
+        self.pin = int(pin)
+        self.frequency_hz = int(frequency_hz)
+        self._value = 0.0
+        self._closed = False
+        # tx_pwm() 전에 명시적으로 LOW output으로 claim해야 Pi 5/RP1에서
+        # PWM 정지 시 'bad PWM micros' 없이 안정적으로 Duty 0%를 적용한다.
+        self._lgpio.gpio_claim_output(self._handle, self.pin, 0)
+
+    @property
+    def value(self):
+        return self._value
+
+    @value.setter
+    def value(self, requested):
+        if self._closed:
+            raise RuntimeError("GPIO PWM 장치가 닫혀 있습니다.")
+        value = max(0.0, min(float(requested), 1.0))
+        if value > 0.0:
+            self._lgpio.tx_pwm(
+                self._handle,
+                self.pin,
+                self.frequency_hz,
+                value * 100.0,
+            )
+        else:
+            self._lgpio.tx_pwm(
+                self._handle,
+                self.pin,
+                self.frequency_hz,
+                0,
+            )
+        self._value = value
+
+    def close(self):
+        if self._closed:
+            return
+        try:
+            self.value = 0.0
+        finally:
+            self._closed = True
+            try:
+                self._lgpio.gpio_free(self._handle, self.pin)
+            finally:
+                self._lgpio.gpiochip_close(self._handle)
+
+
 class BuzzerService:
     """
     Raspberry Pi 수동부저 PWM 출력 Service.
@@ -99,10 +211,11 @@ class BuzzerService:
         self.frequency_hz = int(frequency_hz)
         self.duty_cycle = float(duty_cycle)
 
-        # gpiozero PWMOutputDevice.
-        # Raspberry Pi가 아닌 개발 PC에서도 import 단계에서
-        # 전체 Hardware Process가 죽지 않도록 open()에서 생성한다.
+        # lgpio PWM adapter. Raspberry Pi가 아닌 개발 PC에서도 import
+        # 단계에서 전체 Hardware Process가 죽지 않도록 open()에서 생성한다.
         self._device = None
+        self.gpiochip = None
+        self.gpiochip_label = None
 
         # ----------------------------------------------------
         # Hardware 상태
@@ -143,7 +256,7 @@ class BuzzerService:
         """
         Raspberry Pi GPIO18 PWM Device를 연다.
 
-        Raspberry Pi 5에서는 gpiozero + lgpio 환경을 사용한다.
+        Raspberry Pi 5에서는 실제 ``pinctrl-rp1`` gpiochip을 찾아 lgpio로 연다.
 
         GPIO 초기화에 실패하더라도 예외를 Hardware Process 밖으로
         던지지 않고 False를 반환한다.
@@ -152,17 +265,23 @@ class BuzzerService:
         if self.available and self._device is not None:
             return True
 
+        handle = None
         try:
-            # Raspberry Pi가 아닌 PC에서 이 모듈을 import해도
-            # 바로 실패하지 않도록 실제 GPIO import는 여기서 수행한다.
-            from gpiozero import PWMOutputDevice
+            # Raspberry Pi가 아닌 PC에서 이 모듈을 import해도 바로 실패하지
+            # 않도록 실제 GPIO import와 장치 탐색은 여기서 수행한다.
+            import lgpio
 
-            self._device = PWMOutputDevice(
+            handle, chip, label = _open_user_gpiochip(lgpio, self.pin)
+            self._device = _LGPIOPWMDevice(
+                lgpio,
+                handle,
+                chip,
+                label,
                 self.pin,
-                active_high=True,
-                initial_value=0.0,
-                frequency=self.frequency_hz,
+                self.frequency_hz,
             )
+            self.gpiochip = chip
+            self.gpiochip_label = label
 
             self.available = True
             self.last_error = None
@@ -172,7 +291,7 @@ class BuzzerService:
 
             print(
                 "[BuzzerService] 준비 완료 "
-                f"(BCM{self.pin}, "
+                f"(gpiochip{chip}:{label}, BCM{self.pin}, "
                 f"{self.frequency_hz}Hz, "
                 f"Duty={self.duty_cycle:.2f})"
             )
@@ -180,7 +299,14 @@ class BuzzerService:
             return True
 
         except Exception as error:
+            if handle is not None and self._device is None:
+                try:
+                    lgpio.gpiochip_close(handle)
+                except Exception:
+                    pass
             self._device = None
+            self.gpiochip = None
+            self.gpiochip_label = None
             self.available = False
             self.last_error = str(error)
 
@@ -541,6 +667,8 @@ class BuzzerService:
                 pass
 
         self.available = False
+        self.gpiochip = None
+        self.gpiochip_label = None
 
         print("[BuzzerService] 종료")
 
@@ -564,6 +692,8 @@ class BuzzerService:
                 or self._pending_patterns
             ),
             "pin": self.pin,
+            "gpiochip": self.gpiochip,
+            "gpiochip_label": self.gpiochip_label,
             "frequency_hz": self.frequency_hz,
             "duty_cycle": self.duty_cycle,
             "phase": self._phase,
