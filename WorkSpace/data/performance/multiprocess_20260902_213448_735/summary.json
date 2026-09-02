@@ -1,0 +1,30 @@
+{
+  "schema_version": 2,
+  "session_id": "20260902_213448_735",
+  "architecture": "MULTIPROCESS",
+  "generated_at": "2026-09-02T21:37:36",
+  "measurement_scope": "MEASURING samples only",
+  "core_metrics": {
+    "camera_fps_avg": 30.105870719022054,
+    "pose_fps_avg": 24.71921299465657,
+    "pose_e2e_ms_avg": 81.56713024039512,
+    "main_cpu_percent_avg": 41.46775203514497,
+    "pose_cpu_percent_avg": 94.61559187005369
+  },
+  "diagnostic_metrics": {
+    "shared_memory_write_ms_avg": 0.19853297243719964,
+    "queue_latency_ms_avg": 42.01677371128047,
+    "mediapipe_ms_avg": 38.037417508668106,
+    "ring_pending_max": 2.0,
+    "ring_skipped_final": 458.0,
+    "ring_overrun_final": 14.0
+  },
+  "sample_counts": {
+    "main": 45,
+    "pose": 45
+  },
+  "files": {
+    "main_profile": "main_profile.json",
+    "pose_profile": "pose_profile.json"
+  }
+}

@@ -1,4 +1,3 @@
-import os
 import sys
 import time
 import traceback
@@ -8,17 +7,6 @@ from enum import Enum, auto
 from pathlib import Path
 
 import cv2
-
-# OpenCV의 일반(opencv-python) wheel은 Linux에서 자체 Qt plugin 경로를
-# QT_QPA_PLATFORM_PLUGIN_PATH에 등록할 수 있다. PyQt5 QApplication이 이후
-# 생성되면 cv2/qt/plugins의 xcb를 잘못 로드하면서 충돌할 수 있으므로,
-# OpenCV가 주입한 경로만 제거한다. 카메라/영상 처리 기능에는 영향이 없다.
-if platform.system() == "Linux":
-    for _qt_env_name in ("QT_QPA_PLATFORM_PLUGIN_PATH", "QT_QPA_FONTDIR"):
-        _qt_env_value = os.environ.get(_qt_env_name, "")
-        if "cv2/qt" in _qt_env_value.replace("\\", "/"):
-            os.environ.pop(_qt_env_name, None)
-
 import numpy as np
 
 from PyQt5.QtCore import QThread, pyqtSignal
@@ -32,7 +20,7 @@ import modules.config as config
 
 from managers.vision_process_manager_profile import VisionProcessManager
 from result_worker import VisionResultWorker
-from performance_metrics import JsonPerformanceLogger, write_run_summary
+from performance_metrics import JsonPerformanceLogger
 
 
 CAMERA_FPS = 30
@@ -320,10 +308,6 @@ class CameraWorker(QThread):
             profile_mode=self.vision_manager.profile_mode,
             ring_slot_count=self.vision_manager.slot_count,
         )
-        # 성능평가 데이터는 일반 측정/사용자 로그와 분리된 전용 폴더에 저장한다.
-        # 앱 1회 실행 = 성능평가 run 1개이며, 실제 sample은 MEASURING 구간만 기록한다.
-        write_run_summary(self.performance_dir)
-        print(f"[PERFORMANCE] JSON 저장 폴더: {self.performance_dir}")
         self.result_worker = VisionResultWorker(
             vision_manager=self.vision_manager,
             parent=self
@@ -429,10 +413,6 @@ class CameraWorker(QThread):
                             mode=self.mode.name,
                         )
                         self.performance_logger.append(snapshot)
-                        # Main/Pose 원본 JSON은 그대로 보존하고, Tool에서 바로 읽을 수 있는
-                        # 요약 파일을 별도로 갱신한다. Pose sample이 한 window 늦더라도 다음
-                        # 갱신 때 자동 반영된다.
-                        write_run_summary(self.performance_dir)
 
                     profiler.reset()
 

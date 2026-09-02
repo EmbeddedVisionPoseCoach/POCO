@@ -1,0 +1,17 @@
+POCO 멀티프로세스 성능평가 패치 적용
+
+1) 이 ZIP을 Raspberry Pi의 ~/POCO 폴더에 둡니다.
+2) ~/POCO에서 아래 명령을 실행합니다.
+
+   unzip -o POCO_multiprocess_performance_storage_v3.zip -d ~/POCO
+
+3) 적용 확인:
+
+   grep -n "JsonPerformanceLogger" ~/POCO/WorkSpace/pyQt/camera_worker_profile_all.py
+   grep -n "performance_logger" ~/POCO/WorkSpace/pyQt/processes/pose_process_profile.py
+
+4) 앱 실행 후 저장 위치 확인:
+
+   find ~/POCO/WorkSpace/data/performance -maxdepth 2 -type f -print
+
+성능 JSON sample은 MEASURING 상태에서 2초 단위로 추가됩니다.
